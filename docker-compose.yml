@@ -47,7 +47,7 @@ services:
     #      PHP_XDEBUG_REMOTE_HOST: 10.254.254.254 # macOS
     #      PHP_XDEBUG_REMOTE_HOST: 10.0.75.1 # Windows
     volumes:
-    - ./:/var/www/html
+    - ./web:/var/www/html/risorse
 ## Alternative for macOS users: Mutagen https://wodby.com/docs/stacks/php/local#docker-for-mac
 #    - mutagen:/var/www/html
 ## For XHProf and Xdebug profiler traces
@@ -80,9 +80,11 @@ services:
       APACHE_LOG_LEVEL: debug
       APACHE_BACKEND_HOST: php
       APACHE_VHOST_PRESET: php
-      APACHE_DOCUMENT_ROOT: /var/www/html/web
+      APACHE_DOCUMENT_ROOT: /var/www/html/
     volumes:
-    - ./:/var/www/html:cached
+    - ./docroot:/var/www/html
+    - ./web:/var/www/html/risorse
+    #- ./:/var/www/html:cached
     ports:
       - "7000:80"
 ### Alternative for macOS users: Mutagen https://wodby.com/docs/stacks/php/local#docker-for-mac

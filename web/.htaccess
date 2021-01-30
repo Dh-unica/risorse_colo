@@ -2,6 +2,8 @@ SetEnv APPLICATION_ENV "production"
 
 RewriteEngine On
 
+RewriteBase /risorse
+
 # The following rule tells Apache that if the requested filename
 # exists, simply serve it.
 RewriteCond %{REQUEST_FILENAME} -f
@@ -36,3 +38,5 @@ RewriteRule ^(.*)$ %{ENV:BASE}/index.php [E=OMEKA_REQ:"1",L]
         Deny from all
     </IfModule>
 </FilesMatch>
+
+RewriteBase /risorse
