@@ -1,2 +1,4 @@
 .idea/
 mutagen.yml.lock
+/mariadb-init/*.sql
+/mariadb-init/*.zip
