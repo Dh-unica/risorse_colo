@@ -142,7 +142,7 @@ final class Versions
   'theseer/tokenizer' => '1.1.3@11336f6f84e16a720dae9d8e6ed5019efa85a0f9',
   'webmozart/assert' => '1.7.0@aed98a490f9a8f78468232db345ab9cf606cf598',
   'zerocrates/extract-tagged-strings' => 'dev-master@30d65c77689513ef3ab66bed22a345835b2b4218',
-  'omeka/omeka-s' => 'v3.0.0@cb0c1fe27c5da4870c75340d949318175030d447',
+  'omeka/omeka-s' => 'v3.0.1@692dbab768b67f4e2ff67aa630ac99c68d90375f',
 );
 
     private function __construct()
