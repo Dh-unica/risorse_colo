@@ -2,3 +2,5 @@
 mutagen.yml.lock
 /mariadb-init/*.sql
 /mariadb-init/*.zip
+/web/files/
+/web/files/*
