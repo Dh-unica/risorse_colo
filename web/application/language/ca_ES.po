@@ -1330,7 +1330,7 @@ msgstr "Prohibit"
 
 #: application/view/error/404.phtml:4
 msgid "Page not found"
-msgstr ""
+msgstr "Pàgina no trobada"
 
 #: application/view/error/404.phtml:6
 msgid ""
@@ -2702,7 +2702,7 @@ msgstr "Pàgines"
 #: application/view/omeka/site-admin/index/add.phtml:7
 #: application/view/omeka/site-admin/index/edit.phtml:32
 msgid "Info"
-msgstr ""
+msgstr "Info"
 
 #: application/view/omeka/site-admin/index/add.phtml:8
 #: application/view/omeka/site-admin/index/show.phtml:32
@@ -2898,7 +2898,7 @@ msgstr "Aplica els canvis"
 #: application/view/omeka/site-admin/page/index.phtml:27
 #: application/view/omeka/site-admin/page/index.phtml:50
 msgid "Modified"
-msgstr ""
+msgstr "Modificat"
 
 #: application/view/omeka/site-admin/page/index.phtml:41
 msgid "Add new page"
@@ -3583,11 +3583,11 @@ msgstr ""
 
 #: application/src/Form/SiteSettingsForm.php:235
 msgid "This site"
-msgstr ""
+msgstr "Aquest lloc"
 
 #: application/src/Form/SiteSettingsForm.php:236
 msgid "All sites"
-msgstr ""
+msgstr "Tots els llocs"
 
 #: application/src/Form/SiteSettingsForm.php:253
 msgid "Search resources"
