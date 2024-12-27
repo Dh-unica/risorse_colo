@@ -2,8 +2,8 @@
 
 namespace BulkImport\Form\Processor;
 
+use BulkImport\Form\Element as BulkImportElement;
 use BulkImport\Traits\ServiceLocatorAwareTrait;
-use Common\Form\Element as CommonElement;
 use Laminas\Form\Element;
 use Laminas\Form\Fieldset;
 use Omeka\Form\Element as OmekaElement;
@@ -12,7 +12,7 @@ trait CommonProcessTrait
 {
     use ServiceLocatorAwareTrait;
 
-    protected function addCommonProcess(): self
+    protected function addCommonProcess(): \Laminas\Form\Form
     {
         $this
             ->add([
@@ -31,7 +31,7 @@ trait CommonProcessTrait
 
             ->add([
                 'name' => 'processing',
-                'type' => CommonElement\OptionalRadio::class,
+                'type' => BulkImportElement\OptionalRadio::class,
                 'options' => [
                     'label' => 'Process control', // @translate
                     'info' => 'In all cases, the check of identifiers, linked resources, template values, and files presence is done during a first loop.', // @translate
@@ -51,7 +51,7 @@ trait CommonProcessTrait
                 'name' => 'skip_missing_files',
                 'type' => Element\Checkbox::class,
                 'options' => [
-                    'label' => 'Don’t stop process when a file attached to an item is missing (import item metadata only)', // @translate
+                    'label' => 'Don’t stop process when a file is missing (import item metadata only)', // @translate
                 ],
                 'attributes' => [
                     'id' => 'skip_missing_files',
@@ -97,11 +97,23 @@ trait CommonProcessTrait
                     'id' => 'info_diffs',
                 ],
             ])
+
+            ->add([
+                'name' => 'store_as_task',
+                'type' => Element\Checkbox::class,
+                'options' => [
+                    'label' => 'Store import as a task', // @translate
+                    'info' => 'Allows to store a job to run it via command line or a cron task (see module EasyAdmin).', // @translate
+                ],
+                'attributes' => [
+                    'id' => 'store_as_task',
+                ],
+            ])
         ;
         return $this;
     }
 
-    protected function addOwner(): self
+    protected function addOwner(): \Laminas\Form\Form
     {
         $services = $this->getServiceLocator();
         $urlHelper = $services->get('ViewHelperManager')->get('url');
@@ -135,7 +147,7 @@ trait CommonProcessTrait
         return $this;
     }
 
-    protected function addFiles(): self
+    protected function addFiles(): \Laminas\Form\Form
     {
         // Set binary content encoding
         $this
@@ -169,7 +181,7 @@ trait CommonProcessTrait
         return $this;
     }
 
-    protected function addCommonProcessInputFilter(): self
+    protected function addCommonProcessInputFilter(): \Laminas\Form\Form
     {
         $this->getInputFilter()
             ->add([
@@ -180,11 +192,16 @@ trait CommonProcessTrait
                 'name' => 'entries_max',
                 'required' => false,
             ])
+
+            ->add([
+                'name' => 'store_as_task',
+                'required' => false,
+            ])
         ;
         return $this;
     }
 
-    protected function addOwnerInputFilter(): self
+    protected function addOwnerInputFilter(): \Laminas\Form\Form
     {
         $this->getInputFilter()
             ->add([
@@ -194,7 +211,7 @@ trait CommonProcessTrait
         return $this;
     }
 
-    protected function addFilesFilter(): self
+    protected function addFilesFilter(): \Laminas\Form\Form
     {
         $this->getInputFilter()
             ->get('files')

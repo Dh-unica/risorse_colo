@@ -16,49 +16,21 @@ class ItemSetProcessor extends ResourceProcessor
 
     protected $paramsFormClass = ItemSetProcessorParamsForm::class;
 
-    /**
-     * @see \Omeka\Api\Representation\ItemSetRepresentation
-     *
-     * @var array
-     */
-    protected $fieldTypes = [
-        // Common metadata.
-        'resource_name' => 'string',
-        // "o:id" may be an identifier.
-        'o:id' => 'string',
-        'o:created' => 'datetime',
-        'o:modified' => 'datetime',
-        'o:is_public' => 'boolean',
-        'o:owner' => 'entity',
-        // Alias of "o:owner" here.
-        'o:email' => 'entity',
-        // Generic.
-        'o:resource_template' => 'entity',
-        'o:resource_class' => 'entity',
-        'o:thumbnail' => 'entity',
-        // A common, but special and complex key, so managed in meta config too.
-        'property' => 'arrays',
-        // Item set.
-        'o:is_open' => 'boolean',
-        'o:items' => 'entities',
-    ];
-
     protected function handleFormSpecific(ArrayObject $args, array $values): self
     {
-        return $this
-            ->handleFormItemSet($args, $values);
+        $this->handleFormItemSet($args, $values);
+        return $this;
     }
 
-    protected function prepareBaseEntitySpecific(ArrayObject $resource): self
+    protected function baseSpecific(ArrayObject $resource): self
     {
-        return $this
-            ->prepareBaseResourceCommon($resource)
-            ->prepareBaseItemSet($resource);
+        $this->baseResourceCommon($resource);
+        $this->baseItemSet($resource);
+        return $this;
     }
 
-    protected function fillResourceSpecific(ArrayObject $resource, array $data, ?string $mainResourceName = null): self
+    protected function fillSpecific(ArrayObject $resource, $target, array $values): bool
     {
-        return $this
-            ->fillItemSet($resource, $data);
+        return $this->fillItemSet($resource, $target, $values);
     }
 }

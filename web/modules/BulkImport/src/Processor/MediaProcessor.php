@@ -16,55 +16,21 @@ class MediaProcessor extends ResourceProcessor
 
     protected $paramsFormClass = MediaProcessorParamsForm::class;
 
-    /**
-     * @see \Omeka\Api\Representation\MediaRepresentation
-     *
-     * @var array
-     */
-    protected $fieldTypes = [
-        // Common metadata.
-        'resource_name' => 'string',
-        // "o:id" may be an identifier.
-        'o:id' => 'string',
-        'o:created' => 'datetime',
-        'o:modified' => 'datetime',
-        'o:is_public' => 'boolean',
-        'o:owner' => 'entity',
-        // Alias of "o:owner" here.
-        'o:email' => 'entity',
-        // Generic.
-        'o:resource_template' => 'entity',
-        'o:resource_class' => 'entity',
-        'o:thumbnail' => 'entity',
-        // A common, but special and complex key, so managed in meta config too.
-        'property' => 'arrays',
-        // Media.
-        'o:item' => 'entity',
-        'o:lang' => 'string',
-        'o:ingester' => 'string',
-        'o:source' => 'string',
-        'ingest_filename' => 'string',
-        'ingest_directory' => 'string',
-        'ingest_url' => 'string',
-        'html' => 'string',
-    ];
-
     protected function handleFormSpecific(ArrayObject $args, array $values): self
     {
-        return $this
-            ->handleFormMedia($args, $values);
+        $this->handleFormMedia($args, $values);
+        return $this;
     }
 
-    protected function prepareBaseEntitySpecific(ArrayObject $resource): self
+    protected function baseSpecific(ArrayObject $resource): self
     {
-        return $this
-            ->prepareBaseResourceCommon($resource)
-            ->prepareBaseMedia($resource);
+        $this->baseResourceCommon($resource);
+        $this->baseMedia($resource);
+        return $this;
     }
 
-    protected function fillResourceSpecific(ArrayObject $resource, array $data, ?string $mainResourceName = null): self
+    protected function fillSpecific(ArrayObject $resource, $target, array $values): bool
     {
-        return $this
-            ->fillMedia($resource, $data);
+        return $this->fillMedia($resource, $target, $values);
     }
 }

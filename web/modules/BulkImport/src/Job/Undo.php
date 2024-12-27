@@ -2,6 +2,7 @@
 
 namespace BulkImport\Job;
 
+use Log\Stdlib\PsrMessage;
 use Omeka\Job\AbstractJob;
 
 class Undo extends AbstractJob
@@ -27,18 +28,18 @@ class Undo extends AbstractJob
         }
 
         if (empty($import)) {
-            $logger->err(
+            $logger->err(new PsrMessage(
                 'The import #{import} does not exist.', // @translate
                 ['import' => $id]
-            );
+            ));
             return;
         }
 
         if (!$import->job()) {
-            $logger->warn(
+            $logger->warn(new PsrMessage(
                 'The import #{import} has no resource.', // @translate
                 ['import' => $id]
-            );
+            ));
             return;
         }
 
@@ -46,24 +47,24 @@ class Undo extends AbstractJob
         $totalResults = $response->getTotalResults();
 
         if (!$totalResults) {
-            $logger->notice(
+            $logger->notice(new PsrMessage(
                 'No resource processed by import #{import} or resources not recorded.', // @translate
                 ['import' => $id]
-            );
+            ));
             return;
         }
 
-        $logger->notice(
+        $logger->notice(new PsrMessage(
             'Processing undo of {total} resources for import #{import}.', // @translate
             ['total' => $totalResults, 'import' => $id]
-        );
+        ));
 
         foreach (array_chunk($response->getContent(), 100, true) as $chunkIndex => $importedIdsResourceIds) {
             if ($this->shouldStop()) {
-                $logger->warn(
+                $logger->warn(new PsrMessage(
                     'The job "Undo" was stopped: {count}/{total} resources deleted.', // @translate
                     ['count' => $chunkIndex * 100, 'total' => $totalResults]
-                );
+                ));
                 break;
             }
             // Delete medias first to avoid the entity manager issue "new entity is found"
@@ -100,15 +101,15 @@ class Undo extends AbstractJob
             } catch (\Exception $e) {
             }
             $entityManager->clear();
-            $logger->info(
+            $logger->info(new PsrMessage(
                 '{count}/{total} resources deleted.', // @translate
                 ['count' => $chunkIndex * 100 + count($importedIdsResourceIds), 'total' => $totalResults]
-            );
+            ));
         }
 
-        $logger->notice(
+        $logger->notice(new PsrMessage(
             'Undo of {total} imported resources ended for import #{import}.', // @translate
             ['total' => $totalResults, 'import' => $id]
-        );
+        ));
     }
 }

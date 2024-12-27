@@ -19,7 +19,7 @@ trait ConfigTrait
      * It contains a filepath (inside Omeka "files" or inside the folder "data/configs"
      * of the module) and the mapping of the headers with the standard headers.
      *
-     * @see Old ManiocProcessor as an example.
+     * @see ManiocProcessor as an example.
      *
      * This is not the configurable trait.
      *
@@ -139,7 +139,7 @@ trait ConfigTrait
             if (empty($field) || empty($term)) {
                 unset($table[$key]);
             } else {
-                $termId = $this->easyMeta->propertyId($term);
+                $termId = $this->bulk->getPropertyId($term);
                 if ($termId) {
                     $map['property_id'] = $termId;
                 } else {

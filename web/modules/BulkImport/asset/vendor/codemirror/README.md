@@ -1,8 +1,7 @@
-# CodeMirror 5
-
-**NOTE:** [CodeMirror 6](https://codemirror.net/) exists, and is more mobile-friendly, more accessible, better designed, and much more actively maintained.
+# CodeMirror
 
 [![Build Status](https://github.com/codemirror/codemirror5/workflows/main/badge.svg)](https://github.com/codemirror/codemirror5/actions)
+[![NPM version](https://img.shields.io/npm/v/codemirror.svg)](https://www.npmjs.org/package/codemirror)
 
 CodeMirror is a versatile text editor implemented in JavaScript for
 the browser. It is specialized for editing code, and comes with over
@@ -34,7 +33,7 @@ Either get the [zip file](https://codemirror.net/5/codemirror.zip) with
 the latest version, or make sure you have [Node](https://nodejs.org/)
 installed and run:
 
-    npm install codemirror@5
+    npm install codemirror
 
 **NOTE**: This is the source repository for the library, and not the
 distribution channel. Cloning it is not the recommended way to install

@@ -2,7 +2,9 @@
 
 namespace BulkImport\Form\Processor;
 
+use BulkImport\Traits\ServiceLocatorAwareTrait;
 use Laminas\Form\Element;
+use Laminas\Form\Fieldset;
 use Laminas\Form\Form;
 use Omeka\Form\Element as OmekaElement;
 
@@ -13,7 +15,6 @@ abstract class AbstractResourceProcessorConfigForm extends Form
     public function init(): void
     {
         $this
-            ->setAttribute('id', 'form-bulk-importer')
             ->baseFieldset()
             ->addFieldsets();
 
@@ -22,7 +23,7 @@ abstract class AbstractResourceProcessorConfigForm extends Form
             ->addInputFilter();
     }
 
-    protected function baseFieldset(): self
+    protected function baseFieldset(): \Laminas\Form\Form
     {
         $this
             ->addCommonProcess()
@@ -62,14 +63,13 @@ abstract class AbstractResourceProcessorConfigForm extends Form
                     'label' => 'Action on unidentified resources', // @translate
                     'info' => 'What to do when a resource to update does not exist.', // @translate
                     'value_options' => [
-                        \BulkImport\Processor\AbstractResourceProcessor::ACTION_ERROR => 'Set error', // @translate
                         \BulkImport\Processor\AbstractProcessor::ACTION_SKIP => 'Skip entry', // @translate
                         \BulkImport\Processor\AbstractProcessor::ACTION_CREATE => 'Create a new resource', // @translate
                     ],
                 ],
                 'attributes' => [
                     'id' => 'action_unidentified',
-                    'value' => \BulkImport\Processor\AbstractResourceProcessor::ACTION_ERROR,
+                    'value' => \BulkImport\Processor\AbstractProcessor::ACTION_SKIP,
                 ],
             ])
 
@@ -235,12 +235,99 @@ abstract class AbstractResourceProcessorConfigForm extends Form
         return $this;
     }
 
-    protected function addFieldsets(): self
+    protected function addFieldsets(): \Laminas\Form\Form
     {
         return $this;
     }
 
-    protected function baseInputFilter(): self
+    protected function addMapping(): \Laminas\Form\Form
+    {
+        /**
+         * @var \BulkImport\Processor\Processor $processor
+         * @var \BulkImport\Reader\Reader $reader
+         */
+        $processor = $this->getOption('processor');
+        $reader = $processor->getReader();
+
+        // Add all columns from file as inputs.
+        $availableFields = $reader->getAvailableFields();
+        if (!count($availableFields)) {
+            return $this;
+        }
+
+        $services = $this->getServiceLocator();
+        /** @var \BulkImport\Mvc\Controller\Plugin\AutomapFields $automapFields */
+        $automapFields = $services->get('ControllerPluginManager')->get('automapFields');
+
+        $this
+            ->add([
+                'name' => 'mapping',
+                'type' => Fieldset::class,
+                'options' => [
+                    'label' => 'Mapping from sources to resources', // @translate
+                ],
+            ]);
+
+        $fieldset = $this->get('mapping');
+
+        $fields = $automapFields($availableFields);
+        $prependedMappingOptions = $this->prependMappingOptions();
+        foreach ($availableFields as $index => $name) {
+            if (!strlen(trim($name))) {
+                continue;
+            }
+            $fieldset
+                ->add([
+                    'name' => $name,
+                    'type' => OmekaElement\PropertySelect::class,
+                    'options' => [
+                        // Fix an issue when a header of a csv file is "0".
+                        'label' => is_numeric($name) && intval($name) === 0 ? "[$name]" : $name,
+                        'term_as_value' => true,
+                        'prepend_value_options' => $prependedMappingOptions,
+                    ],
+                    'attributes' => [
+                        'value' => $fields[$index] ?? null,
+                        'required' => false,
+                        'multiple' => true,
+                        'class' => 'chosen-select',
+                        'data-placeholder' => 'Select one or more targets…', // @translate
+                    ],
+                ]);
+        }
+        return $this;
+    }
+
+    protected function prependMappingOptions(): array
+    {
+        return [
+            // Id is only for update.
+            'o:id' => 'Internal id', // @translate
+            'media_identifier' => [
+                'label' => 'Media identifier', // @translate
+                'options' => [
+                    'o:source' => 'Source', // @translate
+                    'o:filename' => 'File name', // @translate
+                    // When used with module Archive Repertory.
+                    'o:basename' => 'Base file name', // @translate
+                    'o:storage_id' => 'Storage id', // @translate
+                    'o:sha256' => 'Hash', // @translate],
+                ],
+            ],
+            'metadata' => [
+                'label' => 'Resource metadata', // @translate
+                'options' => [
+                    'o:resource_template' => 'Resource template', // @translate
+                    'o:resource_class' => 'Resource class', // @translate
+                    'o:thumbnail' => 'Thumbnail', // @translate
+                    'o:owner' => 'Owner', // @translate
+                    'o:is_public' => 'Visibility public/private', // @translate
+                ],
+            ],
+        ];
+    }
+
+    protected function baseInputFilter(): \Laminas\Form\Form
     {
         $this
             ->addCommonProcessInputFilter()
@@ -290,8 +377,23 @@ abstract class AbstractResourceProcessorConfigForm extends Form
         return $this;
     }
 
-    protected function addInputFilter(): self
+    protected function addInputFilter(): \Laminas\Form\Form
     {
+        return $this;
+    }
+
+    protected function addMappingFilter(): \Laminas\Form\Form
+    {
+        $inputFilter = $this->getInputFilter();
+        if (!$inputFilter->has('mapping')) {
+            return $this;
+        }
+
+        $inputFilter = $inputFilter->get('mapping');
+        // Change required to false.
+        foreach ($inputFilter->getInputs() as $input) {
+            $input->setRequired(false);
+        }
         return $this;
     }
 

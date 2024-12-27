@@ -17,19 +17,19 @@ class ImporterAdapter extends AbstractEntityAdapter
         'id' => 'id',
         'label' => 'label',
         'owner_id' => 'owner',
-        'reader' => 'reader',
-        'mapper' => 'mapper',
-        'processor' => 'processor',
+        'reader_class' => 'readerClass',
+        'processor_class' => 'processorClass',
     ];
 
     protected $scalarFields = [
         'id' => 'id',
         'label' => 'label',
         'owner' => 'owner',
-        'reader' => 'reader',
-        'mapper' => 'mapper',
-        'processor' => 'processor',
         'config' => 'config',
+        'reader_class' => 'readerClass',
+        'processor_class' => 'processorClass',
+        'reader_config' => 'readerConfig',
+        'processor_config' => 'processorConfig',
     ];
 
     public function getResourceName()
@@ -77,9 +77,10 @@ class ImporterAdapter extends AbstractEntityAdapter
             $posColon = strpos($key, ':');
             $keyName = $posColon === false ? $key : substr($key, $posColon + 1);
             $method = 'set' . ucfirst($inflector->camelize($keyName));
-            if (method_exists($entity, $method)) {
-                $entity->$method($value);
+            if (!method_exists($entity, $method)) {
+                continue;
             }
+            $entity->$method($value);
         }
     }
 }

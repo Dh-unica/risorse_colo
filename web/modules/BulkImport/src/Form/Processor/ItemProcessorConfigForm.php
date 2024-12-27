@@ -6,7 +6,7 @@ use Omeka\Form\Element\ItemSetSelect;
 
 class ItemProcessorConfigForm extends AbstractResourceProcessorConfigForm
 {
-    protected function addFieldsets(): self
+    protected function addFieldsets(): \Laminas\Form\Form
     {
         parent::addFieldsets();
 
@@ -28,7 +28,7 @@ class ItemProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addInputFilter(): self
+    protected function addInputFilter(): \Laminas\Form\Form
     {
         parent::addInputFilter();
 

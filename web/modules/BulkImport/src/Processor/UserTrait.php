@@ -25,9 +25,9 @@ trait UserTrait
         // The maps is done early in order to keep original ids when possible.
         $this->map['users'] = [];
 
-        $existingUsers = $this->api->search('users', [], ['initialize' => false, 'returnScalar' => 'email'])->getContent();
+        $existingUsers = $this->apiManager->search('users', [], ['initialize' => false, 'returnScalar' => 'email'])->getContent();
         $existingUsernames = !empty($this->modulesActive['UserNames'])
-            ? $this->api->search('usernames', [], ['initialize' => false, 'returnScalar' => 'userName'])->getContent()
+            ? $this->apiManager->search('usernames', [], ['initialize' => false, 'returnScalar' => 'userName'])->getContent()
             : null;
 
         // Emails and user names should be lower-cased to be checked.

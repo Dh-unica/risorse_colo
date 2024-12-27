@@ -270,7 +270,7 @@ trait MetadataTransformTrait
             return false;
         }
 
-        $sourceId = $this->easyMeta->propertyId($params['source']);
+        $sourceId = $this->bulk->getPropertyId($params['source']);
         if (empty($sourceId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source: "{term}" does not exist.', // @translate
@@ -280,7 +280,7 @@ trait MetadataTransformTrait
         }
 
         $sourceIdentifier = $params['identifier'] ?? 'dcterms:identifier';
-        $sourceIdentifierId = $this->easyMeta->propertyId($sourceIdentifier);
+        $sourceIdentifierId = $this->bulk->getPropertyId($sourceIdentifier);
         if (empty($sourceIdentifierId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source identifier term: "{term}" does not exist.', // @translate
@@ -317,7 +317,7 @@ WHERE
     AND (`value_item_set`.`type` = "literal" OR `value_item_set`.`type` = "" OR `value_item_set`.`type` IS NULL)
     AND `value`.`value` = `value_item_set`.`value`
 $sqlExcludeWhere
-ORDER BY `value`.`resource_id` ASC
+ORDER BY `value`.`resource_id`
 ON DUPLICATE KEY UPDATE
     `item_id` = `item_item_set`.`item_id`,
     `item_set_id` = `item_item_set`.`item_set_id`
@@ -336,7 +336,7 @@ SQL;
             );
             return false;
         }
-        $propertyIdSource = $this->easyMeta->propertyId($params['source']);
+        $propertyIdSource = $this->bulk->getPropertyId($params['source']);
         if (empty($propertyIdSource)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source: "{term}" does not exist.', // @translate
@@ -349,7 +349,7 @@ SQL;
             // be multiple destination properties.
             $propertyIdDest = null;
         } else {
-            $propertyIdDest = $this->easyMeta->propertyId($params['destination']);
+            $propertyIdDest = $this->bulk->getPropertyId($params['destination']);
             if (empty($propertyIdDest)) {
                 $this->logger->err(
                     'The operation "{action}" requires a valid destination or no destination: "{term}" does not exist.', // @translate
@@ -387,7 +387,7 @@ SQL;
             return false;
         }
 
-        $sourceId = $this->easyMeta->propertyId($params['source']);
+        $sourceId = $this->bulk->getPropertyId($params['source']);
         if (empty($sourceId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source: "{term}" does not exist.', // @translate
@@ -399,7 +399,7 @@ SQL;
         if (empty($params['destination'])) {
             $destinationId = $sourceId;
         } else {
-            $destinationId = $this->easyMeta->propertyId($params['destination']);
+            $destinationId = $this->bulk->getPropertyId($params['destination']);
             if (empty($destinationId)) {
                 $this->logger->err(
                     'The operation "{action}" requires a valid destination: "{term}" does not exist.', // @translate
@@ -410,7 +410,7 @@ SQL;
         }
 
         $sourceIdentifier = $params['identifier'] ?? 'dcterms:identifier';
-        $sourceIdentifierId = $this->easyMeta->propertyId($sourceIdentifier);
+        $sourceIdentifierId = $this->bulk->getPropertyId($sourceIdentifier);
         if (empty($sourceIdentifierId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source identifier term: "{term}" does not exist.', // @translate
@@ -422,7 +422,7 @@ SQL;
         if (empty($params['reciprocal'])) {
             $reciprocalId = null;
         } else {
-            $reciprocalId = $this->easyMeta->propertyId($params['reciprocal']);
+            $reciprocalId = $this->bulk->getPropertyId($params['reciprocal']);
             if (empty($reciprocalId)) {
                 $this->logger->err(
                     'The operation "{action}" specifies an invalid reciprocal property: "{term}".', // @translate
@@ -463,7 +463,7 @@ WHERE
     AND `value_linked`.`value` <> ""
     AND `value_linked`.`value` IS NOT NULL
     $sqlExcludeWhere
-ORDER BY `value`.`resource_id` ASC
+ORDER BY `value`.`resource_id`
 ;
 SQL;
 
@@ -492,7 +492,7 @@ WHERE
     AND `value_linked`.`value` <> ""
     AND `value_linked`.`value` IS NOT NULL
     $sqlExcludeWhere
-ORDER BY `value`.`resource_id` ASC
+ORDER BY `value`.`resource_id`
 ;
 SQL;
         }
@@ -532,7 +532,7 @@ SQL;
             return false;
         }
 
-        $sourceId = $this->easyMeta->propertyId($params['source']);
+        $sourceId = $this->bulk->getPropertyId($params['source']);
         if (empty($sourceId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source: "{term}" does not exist.', // @translate
@@ -540,7 +540,7 @@ SQL;
             );
             return false;
         }
-        $sourceTerm = $this->easyMeta->propertyTerm($sourceId);
+        $sourceTerm = $this->bulk->getPropertyTerm($sourceId);
 
         if (empty($params['properties'])) {
             $this->logger->err(
@@ -555,7 +555,7 @@ SQL;
         $properties = [];
         $errors = [];
         foreach ($params['properties'] as $property) {
-            $propertyId = $this->easyMeta->propertyId($property);
+            $propertyId = $this->bulk->getPropertyId($property);
             $propertyId
                 ? $properties[$property] = $propertyId
                 : $errors[] = $property;
@@ -572,7 +572,7 @@ SQL;
         $list = $this->listDataValues([$sourceTerm => $sourceId], ['valuesuggest'], 'uri', false);
 
         $headers = [
-            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
+            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/116.0',
             'Content-Type' => 'application/xml',
             'Accept-Encoding' => 'gzip, deflate',
         ];
@@ -767,7 +767,7 @@ SQL;
             return false;
         }
 
-        $sourceId = $this->easyMeta->propertyId($params['source']);
+        $sourceId = $this->bulk->getPropertyId($params['source']);
         if (empty($sourceId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source: "{term}" does not exist.', // @translate
@@ -789,7 +789,7 @@ SQL;
         $properties = [];
         $errors = [];
         foreach ($params['properties'] as $property) {
-            $propertyId = $this->easyMeta->propertyId($property);
+            $propertyId = $this->bulk->getPropertyId($property);
             $propertyId
                 ? $properties[$property] = $propertyId
                 : $errors[] = $property;
@@ -831,7 +831,7 @@ WHERE
     AND `value`.`property_id` IN ($propertyIds)
     AND `value_linked`.`property_id` = $sourceId
     $sqlExcludeWhere
-ORDER BY `value_linked`.`value_resource_id` ASC
+ORDER BY `value_linked`.`value_resource_id`
 ;
 SQL;
 
@@ -853,7 +853,7 @@ SQL;
         $properties = [];
         $errors = [];
         foreach ($params['properties'] as $property) {
-            $propertyId = $this->easyMeta->propertyId($property);
+            $propertyId = $this->bulk->getPropertyId($property);
             $propertyId
                 ? $properties[$property] = $propertyId
                 : $errors[] = $property;
@@ -940,7 +940,7 @@ SQL;
             return false;
         }
 
-        $sourceId = $this->easyMeta->propertyId($params['source']);
+        $sourceId = $this->bulk->getPropertyId($params['source']);
         if (empty($sourceId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source: "{term}" does not exist.', // @translate
@@ -952,7 +952,7 @@ SQL;
         if (empty($params['destination'])) {
             $destinationId = $sourceId;
         } else {
-            $destinationId = $this->easyMeta->propertyId($params['destination']);
+            $destinationId = $this->bulk->getPropertyId($params['destination']);
             if (empty($destinationId)) {
                 $this->logger->err(
                     'The operation "{action}" requires a valid destination: "{term}" does not exist.', // @translate
@@ -1091,8 +1091,8 @@ SQL;
         // TODO Bind is not working currently with multiple queries, but only used for property id.
         // value => bio:place : dcterms:publisher
         $binds = [];
-        $binds['property_id_1'] = $this->easyMeta->propertyId($params['destination'][0]);
-        $binds['property_id_2'] = $this->easyMeta->propertyId($params['destination'][1]);
+        $binds['property_id_1'] = $this->bulk->getPropertyId($params['destination'][0]);
+        $binds['property_id_2'] = $this->bulk->getPropertyId($params['destination'][1]);
 
         $random = $this->operationRandoms[$this->operationIndex];
 
@@ -1166,7 +1166,7 @@ SQL;
             return $this->operationAppendRawValue($params);
         }
 
-        $sourceId = $this->easyMeta->propertyId($params['source']);
+        $sourceId = $this->bulk->getPropertyId($params['source']);
         if (empty($sourceId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source: "{term}" does not exist.', // @translate
@@ -1175,7 +1175,7 @@ SQL;
             return false;
         }
 
-        $sourceTerm = $params['source'] = $this->easyMeta->propertyTerm($sourceId);
+        $sourceTerm = $params['source'] = $this->bulk->getPropertyTerm($sourceId);
 
         if (empty($params['datatype'])) {
             $this->logger->err(
@@ -1209,7 +1209,7 @@ SQL;
         $fromTo = [];
         $errors = [];
         foreach ($params['properties'] as $from => $to) {
-            $toId = $this->easyMeta->propertyId($to);
+            $toId = $this->bulk->getPropertyId($to);
             if ($toId) {
                 $fromTo[$from] = $toId;
             } else {
@@ -1335,7 +1335,7 @@ SQL;
         $propertyIds = [];
         $errors = [];
         foreach ($params['properties'] as $to) {
-            $toId = $this->easyMeta->propertyId($to);
+            $toId = $this->bulk->getPropertyId($to);
             if ($toId) {
                 $propertyIds[] = $toId;
             } else {
@@ -1601,7 +1601,7 @@ SQL;
             return null;
         }
 
-        $sourceId = $this->easyMeta->propertyId($params['source']);
+        $sourceId = $this->bulk->getPropertyId($params['source']);
         if ($hasSource && empty($sourceId)) {
             $this->logger->err(
                 'Operation "{action}": a valid source is required: "{term}" does not exist (mapping file "{file}").', // @translate
@@ -1611,7 +1611,7 @@ SQL;
         }
 
         if (!empty($params['source_term'])) {
-            $saveSourceId = $this->easyMeta->propertyId($params['source_term']);
+            $saveSourceId = $this->bulk->getPropertyId($params['source_term']);
             if (empty($saveSourceId)) {
                 $this->logger->err(
                     'Operation "{action}": an invalid property is set to save source: "{term}" (mapping file "{file}").', // @translate
@@ -1625,12 +1625,12 @@ SQL;
 
         // Just fix messages.
         $params['source'] = $hasSource
-            ? $this->easyMeta->propertyTerm($sourceId)
+            ? $this->bulk->getPropertyTerm($sourceId)
             : 'spreadsheet';
 
         $settings = $params['settings'] ?? [];
         foreach ($settings as $term => &$setting) {
-            $setting['property_id'] = $this->easyMeta->propertyId($term);
+            $setting['property_id'] = $this->bulk->getPropertyId($term);
             if (empty($setting['property_id'])) {
                 unset($settings[$term]);
             }
@@ -1644,7 +1644,7 @@ SQL;
 
         $destinations = [];
         $properties = [];
-        $propertyIds = $this->easyMeta->propertyIds();
+        $propertyIds = $this->bulk->getPropertyIds();
         $fields = $automapFields($firstKeys, ['output_full_matches' => true]);
 
         foreach (array_filter($fields) as $index => $fieldData) {
@@ -1966,11 +1966,11 @@ SQL;
         $properties = [];
         $errors = [];
         foreach ($params['mapping_properties'] as $source => $destination) {
-            $sourceId = $this->easyMeta->propertyId($source);
+            $sourceId = $this->bulk->getPropertyId($source);
             if (!$sourceId) {
                 $errors[] = $source;
             }
-            $destinationId = $this->easyMeta->propertyId($destination);
+            $destinationId = $this->bulk->getPropertyId($destination);
             if (!$destinationId) {
                 $errors[] = $destination;
             }
@@ -2063,7 +2063,7 @@ SQL;
             return false;
         }
 
-        $sourceId = $this->easyMeta->propertyId($params['source']);
+        $sourceId = $this->bulk->getPropertyId($params['source']);
         if (empty($sourceId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid source: "{term}" does not exist.', // @translate
@@ -2072,7 +2072,7 @@ SQL;
             return false;
         }
 
-        $sourceTerm = $params['source'] = $this->easyMeta->propertyTerm($sourceId);
+        $sourceTerm = $params['source'] = $this->bulk->getPropertyTerm($sourceId);
 
         // Only literal: the already mapped values (label + uri) can be used as
         // mapping, but useless for a new database.
@@ -2176,7 +2176,7 @@ SQL;
         $sql = <<<SQL
 SELECT DISTINCT
     `value`.`$column` AS `v`,
-    GROUP_CONCAT(DISTINCT `value`.`resource_id` ORDER BY `value`.`resource_id` ASC SEPARATOR ' ') AS r
+    GROUP_CONCAT(DISTINCT `value`.`resource_id` ORDER BY `value`.`resource_id` SEPARATOR ' ') AS r
 FROM `value`
 JOIN `_temporary_value`
     ON `_temporary_value`.`id` = `value`.`id`
@@ -2188,7 +2188,7 @@ WHERE
     AND `value`.`$column` <> ""
     AND `value`.`$column` IS NOT NULL
 GROUP BY `v`
-ORDER BY `v` ASC
+ORDER BY `v`
 ;
 SQL;
         $bind = [
@@ -2712,7 +2712,7 @@ SQL;
     protected function processUpdateTemplatesFromDataTypes(array $params): void
     {
         $term = empty($params['properties']['identifier']) ? 'dcterms:identifier' : $params['properties']['identifier'];
-        $propertyId = $this->easyMeta->propertyId($term);
+        $propertyId = $this->bulk->getPropertyId($term);
         if (empty($propertyId)) {
             $this->logger->err(
                 'The operation "{action}" requires a valid property to set templates: "{term}" does not exist.', // @translate
@@ -2737,10 +2737,10 @@ SQL;
                 $templateIds[$datatype] = null;
                 $templateClassIds[$datatype] = null;
             } else {
-                $templateId = $this->easyMeta->resourceTemplateId($template);
+                $templateId = $this->bulk->getResourceTemplateId($template);
                 if ($templateId) {
                     $templateIds[$datatype] = $templateId;
-                    $templateClassIds[$datatype] = $this->bulk->resourceTemplateClassId($templateId);
+                    $templateClassIds[$datatype] = $this->bulk->getResourceTemplateClassId($templateId);
                 } else {
                     $errors[] = $template;
                 }
@@ -2757,13 +2757,13 @@ SQL;
 
         if (array_key_exists('', $templateIds) || array_key_exists(0, $templateIds)) {
             $destination = $templateIds[''] ?? $templateIds[0];
-            $destinationClass = $this->bulk->resourceTemplateClassId($destination);
+            $destinationClass = $this->bulk->getResourceTemplateClassId($destination);
             $destinationClass = $destination && $destinationClass ? $destinationClass : 'NULL';
             $destination = $destination ?: 'NULL';
             $whereDestination = '';
         } elseif (count(array_unique($templateIds)) === 1) {
             $destination = reset($templateIds) ?: 'NULL';
-            $destinationClass = $this->bulk->resourceTemplateClassId(reset($templateIds)) ?: 'NULL';
+            $destinationClass = $this->bulk->getResourceTemplateClassId(reset($templateIds)) ?: 'NULL';
             $types = [];
             foreach ($templateIds as $datatype => $templateId) {
                 $types[] = $this->connection->quote($datatype);
@@ -2816,18 +2816,18 @@ SQL;
         // TODO Use the right owner.
         $ownerIdOrNull = $this->owner ? $this->ownerId : 'NULL';
         if (isset($params['template'])) {
-            $templateId = $this->easyMeta->resourceTemplateId($params['template']) ?? 'NULL';
-            $classId = $this->bulk->resourceTemplateClassId($params['template']) ?? 'NULL';
+            $templateId = $this->bulk->getResourceTemplateId($params['template']) ?? 'NULL';
+            $classId = $this->bulk->getResourceTemplateClassId($params['template']) ?? 'NULL';
         } else {
             $templateId = 'NULL';
             $classId = 'NULL';
         }
         if (isset($params['class'])) {
-            $classId = $this->easyMeta->resourceClassId($params['class']) ?? 'NULL';
+            $classId = $this->bulk->getResourceClassId($params['class']) ?? 'NULL';
         }
         $resourceName = empty($params['resource_name'])
             ? \Omeka\Entity\Item::class
-            : $this->easyMeta->entityClass($params['resource_name']) ?? \Omeka\Entity\Item::class;
+            : $this->bulk->getEntityClass($params['resource_name']) ?? \Omeka\Entity\Item::class;
         if ($resourceName === \Omeka\Entity\Media::class) {
             $this->logger->err(
                 'The operation "{action}" cannot create media currently.', // @translate
@@ -2968,11 +2968,11 @@ SQL;
         $properties = [];
         $errors = [];
         foreach ($params['mapping_properties'] as $source => $destination) {
-            $sourceId = $this->easyMeta->propertyId($source);
+            $sourceId = $this->bulk->getPropertyId($source);
             if (!$sourceId) {
                 $errors[] = $source;
             }
-            $destinationId = $this->easyMeta->propertyId($destination);
+            $destinationId = $this->bulk->getPropertyId($destination);
             if (!$destinationId) {
                 $errors[] = $destination;
             }
@@ -2992,7 +2992,7 @@ SQL;
         if (empty($params['reciprocal'])) {
             $reciprocalId = null;
         } else {
-            $reciprocalId = $this->easyMeta->propertyId($params['reciprocal']);
+            $reciprocalId = $this->bulk->getPropertyId($params['reciprocal']);
             if (empty($reciprocalId)) {
                 $this->logger->err(
                     'The operation "{action}" specifies an invalid reciprocal property: "{term}".', // @translate
@@ -3250,7 +3250,7 @@ SQL;
         // Don't use https, or add certificate to omeka config.
         $url = 'http://api.geonames.org/searchJSON';
         $headers = [
-            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
+            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/116.0',
             'Content-Type' => 'application/json',
             'Accept-Encoding' => 'gzip, deflate',
         ];
@@ -3384,7 +3384,7 @@ SQL;
         ];
         $url = 'https://www.idref.fr/Sru/Solr';
         $headers = [
-            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
+            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/116.0',
             'Content-Type' => 'application/json',
             'Accept-Encoding' => 'gzip, deflate',
         ];
@@ -3503,7 +3503,7 @@ SQL;
         ];
         $url = 'https://www.idref.fr/Sru/Solr';
         $headers = [
-            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0',
+            'User-Agent' => 'Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/116.0',
             'Content-Type' => 'application/json',
             'Accept-Encoding' => 'gzip, deflate',
         ];

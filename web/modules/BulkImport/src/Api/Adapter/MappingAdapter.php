@@ -75,9 +75,10 @@ class MappingAdapter extends AbstractEntityAdapter
             $posColon = strpos($key, ':');
             $keyName = $posColon === false ? $key : substr($key, $posColon + 1);
             $method = 'set' . ucfirst($inflector->camelize($keyName));
-            if (method_exists($entity, $method)) {
-                $entity->$method($value);
+            if (!method_exists($entity, $method)) {
+                continue;
             }
+            $entity->$method($value);
         }
 
         $this->hydrateOwner($request, $entity);

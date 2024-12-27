@@ -31,20 +31,19 @@ namespace BulkImport\Stdlib;
 
 use BulkImport\Mvc\Controller\Plugin\AutomapFields;
 use BulkImport\Mvc\Controller\Plugin\Bulk;
-use Common\Stdlib\EasyMeta;
 use Flow\JSONPath\JSONPath;
 use JmesPath\Env as JmesPathEnv;
 use JmesPath\Parser as JmesPathParser;
 use Laminas\Log\Logger;
-use Common\Stdlib\PsrMessage;
+use Log\Stdlib\PsrMessage;
 use SimpleXMLElement;
 
 class MetaMapperConfig
 {
     /**
-     * @var \BulkImport\Mvc\Controller\Plugin\AutomapFields
+     * @var \Laminas\Log\Logger
      */
-    protected $automapFields;
+    protected $logger;
 
     /**
      * @var \BulkImport\Mvc\Controller\Plugin\Bulk
@@ -52,14 +51,9 @@ class MetaMapperConfig
     protected $bulk;
 
     /**
-     * @var \Common\Stdlib\EasyMeta
+     * @var \BulkImport\Mvc\Controller\Plugin\AutomapFields
      */
-    protected $easyMeta;
-
-    /**
-     * @var \Laminas\Log\Logger
-     */
-    protected $logger;
+    protected $automapFields;
 
     /**
      * @var \JmesPath\Env
@@ -88,10 +82,8 @@ class MetaMapperConfig
                 // Label is the only required data.
                 'label' => 'Default empty mapping', // @translate
                 'from' => null,
-                // The resource name, like "resources" or "assets".
                 'to' => null,
-                // xpath, jsonpath, jsdot, jmespath or index.
-                // Index is used for simple array, like a spreadsheet header.
+                // xpath, jsonpath, jsdot, jmespath.
                 'querier' => null,
                 // Used by ini for json. In xml, include can be used.
                 'mapper' => null,
@@ -119,15 +111,13 @@ class MetaMapperConfig
      * Current options.
      */
     public function __construct(
-        AutomapFields $automapFields,
+        Logger $logger,
         Bulk $bulk,
-        EasyMeta $easyMeta,
-        Logger $logger
+        AutomapFields $automapFields
     ) {
-        $this->automapFields = $automapFields;
-        $this->bulk = $bulk;
-        $this->easyMeta = $easyMeta;
         $this->logger = $logger;
+        $this->bulk = $bulk;
+        $this->automapFields = $automapFields;
         $this->jmesPathEnv = new JmesPathEnv;
         $this->jmesPathParser = new JmesPathParser;
         $this->jsonPathQuerier = new JSONPath;
@@ -246,11 +236,6 @@ class MetaMapperConfig
      * - check_field (bool)
      * - output_full_matches (bool)
      * - output_property_id (bool)
-     * // To be removed?
-     * - resource_name (string) : same as info[to]
-     * - field_types (array) : Field types of a resource from the processor.
-     * // Tempo fix to be removed with new manual form.
-     * - is_single_manual (bool): should prepare mapping with full data from keys.
      * @return self|array The normalized mapping.
      */
     public function __invoke(?string $mappingName = null, $mappingOrReference = null, array $options = [])
@@ -316,8 +301,8 @@ class MetaMapperConfig
      *
      * Only the settings for the namable sections can be get, of course.
      *
-     * For sections with type "mapping" or "maps", the name is the "from" path
-     * and all the setting is output.
+     * For sections with type "mapping", the name is the "from" path and all the
+     * setting is output.
      *
      * @todo Remove the exception for mapping.
      */
@@ -390,7 +375,6 @@ class MetaMapperConfig
         } elseif (is_array($mappingOrReference) && isset($mappingOrReference['info'])) {
             $normalizedMapping = $this->prepareMappingNormalized($mappingOrReference, $options);
         } elseif (is_array($mappingOrReference)) {
-            // In particular for spreadsheet.
             $normalizedMapping = $this->prepareMappingList($mappingOrReference, $options);
         } else {
             $content = $this->prepareMappingContent($mappingOrReference);
@@ -399,15 +383,12 @@ class MetaMapperConfig
             }
         }
 
-        // Validate mapping as a whole for default and maps.
+        // Validate mapping as a whole for default and maping.
         if ($normalizedMapping) {
             foreach (['default', 'maps'] as $section) {
-                if (!isset($normalizedMapping[$section])) {
-                    continue;
-                }
                 if (!$this->areValidMaps($normalizedMapping[$section])) {
-                    $this->logger->err(
-                        'Mapping "{mapping_name}": invalid map in section "{section}".', // @translate
+                    $this->logger->warn(
+                        'Mapping "{mapping_name}": invalid map in section "{section}".',
                         ['mapping_name' => $this->mappingName, 'section' => $section]
                     );
                     $normalizedMapping['has_error'] = true;
@@ -417,22 +398,6 @@ class MetaMapperConfig
 
         $this->mappings[$this->mappingName] = $normalizedMapping ?: $this->mappings['_empty'];
         $this->mappings[$this->mappingName]['options'] = $options;
-
-        if ($mappingOrReference && !$normalizedMapping) {
-            if ($normalizedMapping === null) {
-                $this->mappings[$this->mappingName]['has_error'] = true;
-                $this->logger->err(
-                    'Mapping "{mapping_name}" not found.', // @translate
-                    ['mapping_name' => $mappingOrReference]
-                );
-            } else {
-                $this->logger->err(
-                    'Mapping "{mapping_name}" is empty.', // @translate
-                    ['mapping_name' => $mappingOrReference]
-                );
-            }
-        }
-
         return $this;
     }
 
@@ -443,11 +408,11 @@ class MetaMapperConfig
     {
         $normalizedMapping = [
             'options' => $options,
-            'info' => $options['info'] ?? [
+            'info' => $options['infos'] ?? [
                 'label' => $options['label'] ?? $this->mappingName,
                 'from' => null,
-                'to' => $options['resource_name'] ?? null,
-                'querier' => 'index',
+                'to' => null,
+                'querier' => null,
                 'mapper' => null,
                 'example' => null,
             ],
@@ -457,8 +422,6 @@ class MetaMapperConfig
             // TODO Options or mapping to store tables in mapping list (for spreadsheet)? Or module Table.
             'tables' => $options['tables'] ?? [],
             'has_error' => false,
-            // TODO To be removed, only for single manual select.
-            'is_single_manual' => !empty($options['is_single_manual']),
         ];
 
         foreach (['default', 'maps'] as $section) {
@@ -484,7 +447,7 @@ class MetaMapperConfig
             || (array_key_exists('maps', $mapping) && !is_array($mapping['maps']))
         ) {
             $this->logger->warn(
-                'Mapping "{mapping_name}": invalid provided mapping.', // @translate
+                'Mapping "{mapping_name}": invalid provided mapping.',
                 ['mapping_name' => $this->mappingName]
             );
             $normalizedMapping['has_error'] = true;
@@ -528,7 +491,7 @@ class MetaMapperConfig
         }
 
         $prefixes = [
-            'user' => $this->bulk->basePath() . '/mapping/',
+            'user' => $this->bulk->getBasePath() . '/mapping/',
             'module' => dirname(__DIR__, 2) . '/data/mapping/',
             'base' => dirname(__DIR__, 2) . '/data/mapping/base/',
         ];
@@ -758,6 +721,9 @@ class MetaMapperConfig
             }
         }
 
+        // This value allows to keep the original dest single.
+        // @todo Remove [to][dest] and "k".
+        $k = 0;
         foreach (['default', 'maps'] as $section) {
             $isDefault = $section === 'default';
             // TODO Use an attribute or a sub-element ?
@@ -773,6 +739,9 @@ class MetaMapperConfig
                 }
                 $options['index'] = ++$i;
                 $fromTo = $this->normalizeMapFromXml($element, $options);
+                if (isset($fromTo['to']['dest'])) {
+                    $fromTo['to']['dest'] = $fromTo['to']['dest'] . str_repeat(' ', $k++);
+                }
                 $normalizedMapping[$section][] = $fromTo;
             }
         }
@@ -876,7 +845,7 @@ class MetaMapperConfig
         if (is_array($map)) {
             // When the map is an array of maps, each map can be a string or an
             // array, so do a recursive loop in such a case.
-            // It is used in particular for spreadsheet.
+            // Only one level is allowed.
             if (is_numeric(key($map))) {
                 $result = [];
                 foreach ($map as $mapp) {
@@ -892,29 +861,6 @@ class MetaMapperConfig
             'mod' => [],
             'has_error' => true,
         ];
-    }
-
-    public function shortTo(array $map): string
-    {
-        if (!$map) {
-            return '';
-        }
-
-        $hasRaw = isset($map['mod']['raw']);
-        $hasVal = isset($map['mod']['val']);
-        $hasRawOrVal = $hasRaw || $hasVal;
-
-        $fullPattern = $hasRawOrVal
-            ? ($hasRaw ? (string) $map['mod']['raw'] : (string) $map['mod']['val'])
-            : ($map['mod']['prepend'] ?? '') . ($map['mod']['pattern'] ?? '') . ($map['mod']['append'] ?? '');
-
-        return $map['to']['field']
-            // Here, the short datatypes and custom vocab labels are already cleaned.
-            . (count($map['to']['datatype'] ?? []) ? ' ^^' . implode(' ^^', $map['to']['datatype']) : '')
-            . (isset($map['to']['language']) ? ' @' . $map['to']['language'] : '')
-            . (isset($map['to']['is_public']) ? ' §' . ($map['to']['is_public'] ? 'public' : 'private') : '')
-            . (strlen($fullPattern) ? ' ~ ' . $fullPattern : '')
-        ;
     }
 
     protected function normalizeMapFromEmpty($map, array $options): array
@@ -935,18 +881,9 @@ class MetaMapperConfig
             : $this->normalizeMapFromStringIni($map, $options);
     }
 
-    /**
-     * Convert a string into a map.
-     *
-     * The string may be:
-     * - a simple field: a spreadsheet header like `dcterms:title`
-     * - a default value: `dcterms:license = "Public domain"`
-     * - a mapping: `License = dcterms:license ^^literal ~ "Public domain"`
-     * - a complex mapping: `~ = dcterms:spatial ^^geography:coordinates ~ {lat}/{lng}`
-     */
     protected function normalizeMapFromStringIni(string $map, array $options): array
     {
-        $mapString = trim($map);
+        $map = trim($map);
 
         $normalizedMap = [
             'from' => [],
@@ -959,37 +896,20 @@ class MetaMapperConfig
         }
 
         // Skip comments.
-        if (!mb_strlen($mapString) || mb_substr($mapString, 0, 1) === ';') {
+        if (!mb_strlen($map) || mb_substr($map, 0, 1) === ';') {
             return $normalizedMap;
-        }
-
-        // TODO To be removed, only for single manual select (in particular spreadsheet).
-        // With the manual mapping for now, the source is limited to the a
-        // single field, for example "dcterms:date ^^numeric:timestamp" is
-        // mapped to "dcterms:date" only, so the next part of the source should
-        // be reappended. It is managed only for valid property term for now
-        // (useless anywhere else anyway).
-        // It will be fixed when the manual mapping will contains all details.
-        if (isset($options['index'])
-            && !empty($options['is_single_manual'])
-            && ($pos = mb_strpos($options['index'], ' '))
-            && !mb_strpos($mapString, ' ')
-            && $mapString !== $options['index']
-            && $this->easyMeta->propertyId($mapString)
-        ) {
-            $mapString .= mb_substr($options['index'], $pos);
         }
 
         // The map may be only a destination (like spreadsheet headers), so
         // without left and right part, so prepend a generic left part.
-        $p = mb_strpos($mapString, '~');
-        $hasOnlyDestination = mb_strpos($p === false ? $mapString : strtok($mapString, '~'), '=') === false;
+        $p = mb_strpos($map, '~');
+        $hasOnlyDestination = mb_strpos($p === false ? $map : strtok($map, '~'), '=') === false;
         if ($hasOnlyDestination) {
-            $mapString = '~ = ' . $mapString;
+            $map = '~ = ' . $map;
         }
 
-        $first = mb_substr($mapString, 0, 1);
-        // $last = mb_substr($mapString, -1);
+        $first = mb_substr($map, 0, 1);
+        // $last = mb_substr($map, -1);
 
         // The left part can be a xpath, a jmespath, etc. with a "=". On the
         // right part, only a pattern can contain a "=". So split the line
@@ -999,25 +919,25 @@ class MetaMapperConfig
         // When the left part is "~", it means a value from the reader.
         // TODO The left part cannot contain a "~" for now.
         $pos = $first === '~'
-            ? mb_strpos($mapString, '=')
-            : mb_strrpos(strtok($mapString, '~'), '=');
+            ? mb_strpos($map, '=')
+            : mb_strrpos(strtok($map, '~'), '=');
         if ($pos === false) {
             $normalizedMap['has_error'] = new PsrMessage('The map "{map}" has no source or destination.', // @translate
-                ['map' => $mapString]
+                ['map' => $map]
             );
             return $normalizedMap;
         }
 
-        $from = trim(mb_substr($mapString, 0, $pos));
+        $from = trim(mb_substr($map, 0, $pos));
         if (!strlen($from)) {
             $normalizedMap['has_error'] = new PsrMessage('The map "{map}" has no source.', // @translate
-                ['map' => $mapString]
+                ['map' => $map]
             );
             return $normalizedMap;
         }
 
         // Trim leading and trailing quote/double quote only when paired.
-        $to = trim(mb_substr($mapString, $pos + 1));
+        $to = trim(mb_substr($map, $pos + 1));
         $originalTo = $to;
         $isRaw = (mb_substr($to, 0, 1) === '"' && mb_substr($to, -1) === '"')
             || (mb_substr($to, 0, 1) === "'" && mb_substr($to, -1) === "'");
@@ -1060,37 +980,70 @@ class MetaMapperConfig
                 ];
             }
         } else {
-            // Type of section is "mapping" / "maps".
+            // Type of section is "mapping".
             if (!strlen($to)) {
                 if (!strlen($from)) {
                     $normalizedMap['has_error'] = new PsrMessage('The map "{map}" has no destination.', // @translate
-                        ['map' => trim($mapString, "= \t\n\r\0\x0B")]
+                        ['map' => trim($map, "= \t\n\r\0\x0B")]
                     );
                     return $normalizedMap;
                 }
             }
+            // Manage default values: dcterms:license = "Public domain"
+            // and default mapping: dcterms:license = dcterms:license ^^literal ~ "Public domain"
+            // and full source mapping: license = dcterms:license ^^literal ~ "Public domain"
             $toDest = $isRaw
                 ? $from . ' ~ ' . $originalTo
                 : $to;
             $ton = $this->normalizeToFromString($toDest, $options);
             if (!$ton) {
                 $normalizedMap['has_error'] = new PsrMessage('The map "{map}" has an invalid destination "{destination}".', // @translate
-                    ['map' => $mapString, 'destination' => $to]
+                    ['map' => $map, 'destination' => $to]
                 );
                 return $normalizedMap;
             }
         }
 
-        // Here, this is only the last case, so a mapping, with $ton.
+        // For resource properties by default.
+        // Most of other metadata have no data anyway.
+        $resourceName = $normalizedMap['infos']['to'] ?? 'resources';
+        switch ($resourceName) {
+            case 'assets':
+                $toKeys = [
+                    'field' => null,
+                ];
+                break;
+            case 'resources':
+            default:
+                $toKeys = [
+                    'field' => null,
+                    'property_id' => null,
+                    'datatype' => null,
+                    'language' => null,
+                    'is_public' => null,
+                ];
+        }
+
+        $modKeys = [
+            'raw' => null,
+            'val' => null,
+            'prepend' => null,
+            'pattern' => null,
+            'append' => null,
+            'replace' => [],
+            'twig' => [],
+        ];
 
         if (!$hasOnlyDestination) {
             $normalizedMap['from']['path'] = $from;
         }
-
-        $normalizedMap['to'] = $ton['to'];
-        $normalizedMap['mod'] = $ton['mod'];
-
-        return $this->normalizeMapFinalize($normalizedMap, $options);
+        $normalizedMap['to'] = array_intersect_key($ton, $toKeys);
+        $normalizedMap['mod'] = array_filter(array_intersect_key($ton, $modKeys), function ($v) {
+            return !is_null($v) && $v !== '' && $v !== [];
+        });
+        // TODO Remove "[to][dest]".
+        $normalizedMap['to']['dest'] = $toDest;
+        return $normalizedMap;
     }
 
     protected function normalizeMapFromStringXml($map, array $options): array
@@ -1129,8 +1082,6 @@ class MetaMapperConfig
 
         if ($isDefaultMapping) {
             $result['from'] = null;
-        } elseif (isset($xmlArray['from']['@attributes']['index']) && strlen((string) $xmlArray['from']['@attributes']['index'])) {
-            $result['from'] = ['querier' => 'index', 'path' => (string) $xmlArray['from']['@attributes']['index']];
         } elseif (isset($xmlArray['from']['@attributes']['jsdot']) && strlen((string) $xmlArray['from']['@attributes']['jsdot'])) {
             $result['from'] = ['querier' => 'jsdot', 'path' => (string) $xmlArray['from']['@attributes']['jsdot']];
         } elseif (isset($xmlArray['from']['@attributes']['jmespath']) && strlen((string) $xmlArray['from']['@attributes']['jmespath'])) {
@@ -1158,13 +1109,11 @@ class MetaMapperConfig
 
         $result['to']['field'] = (string) $xmlArray['to']['@attributes']['field'];
 
-        $termId = $this->easyMeta->propertyId($result['to']['field']);
-
+        $termId = $this->bulk->getPropertyId($result['to']['field']);
         if ($termId) {
             $result['to']['property_id'] = $termId;
         }
 
-        // Keep other property data even when id cannot be determined early.
         $result['to']['datatype'] = [];
         if (isset($xmlArray['to']['@attributes']['datatype']) && $xmlArray['to']['@attributes']['datatype'] !== '') {
             // Support short data types and custom vocab labels.
@@ -1173,8 +1122,7 @@ class MetaMapperConfig
             $patternDataTypes = '#(?<datatype>(?:customvocab:(?:"[^\n\r"]+"|\'[^\n\r\']+\')|[a-zA-Z_][\w:-]*))#';
             if (preg_match_all($patternDataTypes, (string) $xmlArray['to']['@attributes']['datatype'], $matchesDataTypes, PREG_SET_ORDER, 0)) {
                 foreach (array_column($matchesDataTypes, 'datatype') as $datatype) {
-                    // TODO Factorize data type name generic with automapFields.
-                    $result['to']['datatype'][] = $this->bulk->dataTypeName($datatype);
+                    $result['to']['datatype'][] = $this->bulk->getDataTypeName($datatype);
                 }
                 $result['to']['datatype'] = array_values(array_filter(array_unique($result['to']['datatype'])));
             }
@@ -1232,7 +1180,19 @@ class MetaMapperConfig
             }
         }
 
-        return $this->normalizeMapFinalize($result, $options);
+        // @todo Remove the short destination (used in processor and when converting to avoid duplicates).
+        $fullPattern = $hasNoRawVal
+            ? ($result['mod']['prepend'] ?? '') . ($result['mod']['pattern'] ?? '') . ($result['mod']['append'] ?? '')
+            : (isset($result['mod']['raw']) ? (string) $result['mod']['raw'] : (string) $result['mod']['val']);
+        $result['to']['dest'] = $result['to']['field']
+            // Here, the short datatypes and custom vocab labels are already cleaned.
+            . (count($result['to']['datatype']) ? ' ^^' . implode(' ^^', $result['to']['datatype']) : '')
+            . (isset($result['to']['language']) ? ' @' . $result['to']['language'] : '')
+            . (isset($result['to']['is_public']) ? ' §' . ($result['to']['is_public'] ? 'public' : 'private') : '')
+            . (strlen($fullPattern) ? ' ~ ' . $fullPattern : '')
+        ;
+
+        return $result;
     }
 
     /**
@@ -1253,80 +1213,6 @@ class MetaMapperConfig
 
         // TODO Add more check for map by array.
 
-        return $this->normalizeMapFinalize($map, $options);
-    }
-
-    protected function normalizeMapFinalize(array $map, array $options): array
-    {
-        if (!empty($map['has_error'])) {
-            return $map;
-        }
-
-        // Normalize "from".
-        $fromKeys = [
-            'querier' => null,
-            'path' => null,
-        ];
-
-        // When there is no path from (spreadsheet header), use index as path.
-        // This fix is done late in the process to allows to manage other
-        // possible sources than spreadsheet. For example xml may not have a
-        // "from".
-        if (!isset($map['from']['path'])
-            && isset($map['from'])
-            && array_key_exists('index', $map['from'])
-        ) {
-            $map['from']['path'] = $map['from']['index'];
-        }
-
-        $map['from'] = empty($map['from'])
-            ? $fromKeys
-            : array_intersect_key($map['from'] + $fromKeys, $fromKeys);
-
-        // Normalize "to".
-        $toKeys = [
-            'field' => null,
-            'field_type' => null,
-        ];
-
-        $toField = $map['to']['field'] ?? null;
-
-        if ($this->easyMeta->propertyTerm($toField)) {
-            $toKeys = [
-                'field' => null,
-                'field_type' => 'arrays',
-                // Below is the array for property values.
-                'type' => null,
-                'property_id' => null,
-                'is_public' => null,
-                // Allow to manage default values.
-                'language' => null,
-                // Other keys are added in processing.
-                // Specific keys used for process.
-                'datatype' => [],
-            ];
-        } elseif (empty($map['to']['field_type']) && !empty($options['field_types'][$toField])) {
-            $map['to']['field_type'] = $options['field_types'][$toField];
-        }
-
-        $map['to'] = array_intersect_key($map['to'] + $toKeys, $toKeys);
-
-        // Normalize "mod".
-        $modKeys = [
-            'raw' => null,
-            'val' => null,
-            'prepend' => null,
-            'pattern' => null,
-            'append' => null,
-            'replace' => [],
-            'twig' => [],
-            'twig_has_replace' => [],
-        ];
-
-        $map['mod'] = array_filter(array_intersect_key($map['mod'] ?? [], $modKeys), function ($v) {
-            return !is_null($v) && $v !== '' && $v !== [];
-        });
-
         return $map;
     }
 
@@ -1338,8 +1224,6 @@ class MetaMapperConfig
             'output_property_id' => true,
         ];
 
-        // Automap fields is designed mainly for resources.
-        // TODO Modify process or modify automapFields for other types than resources.
         $result = $this->automapFields->__invoke([$string], $defaultOptions + $options);
         if (empty($result)) {
             return null;
@@ -1347,22 +1231,9 @@ class MetaMapperConfig
 
         // With output_full_matches, there is one more level, so reset twice.
         $result = reset($result);
-        $result = $result ? reset($result) : null;
-        if (!$result) {
-            return null;
-        }
-
-        // Adapt the automap to a meta config map.
-        // Only to/mod is normalized here, not from.
-        $output = [
-            'to' => $result,
-            'mod' => [
-                'pattern' => $result['pattern'] ?? null,
-            ],
-        ];
-        unset($output['to']['pattern']);
-
-        return $output;
+        return $result
+            ? reset($result)
+            : null;
     }
 
     /**

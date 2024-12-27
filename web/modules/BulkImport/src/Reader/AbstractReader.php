@@ -10,12 +10,10 @@ use BulkImport\Traits\ConfigurableTrait;
 use BulkImport\Traits\ParametrizableTrait;
 use BulkImport\Traits\ServiceLocatorAwareTrait;
 use Laminas\Form\Form;
-use Laminas\Log\Logger;
 use Laminas\ServiceManager\ServiceLocatorInterface;
-use Common\Stdlib\PsrMessage;
 
 /**
- * Reader implements Iterator and Countable.
+ * @todo The reader itself may be an iterator or an array. Here too?
  */
 abstract class AbstractReader implements Reader, Configurable, Parametrizable
 {
@@ -28,24 +26,9 @@ abstract class AbstractReader implements Reader, Configurable, Parametrizable
     protected $entryClass = BaseEntry::class;
 
     /**
-     * @var \BulkImport\Mvc\Controller\Plugin\Bulk
-     */
-    protected $bulk;
-
-    /**
-     * @var \BulkImport\Mvc\Controller\Plugin\BulkFile
-     */
-    protected $bulkFile;
-
-    /**
      * @var \BulkImport\Stdlib\MetaMapper|null
      */
     protected $metaMapper;
-
-    /**
-     * @var \Laminas\Log\Logger
-     */
-    protected $logger;
 
     /**
      * This is the base path of the files, not the base path of the url.
@@ -65,14 +48,8 @@ abstract class AbstractReader implements Reader, Configurable, Parametrizable
     protected $availableFields = [];
 
     /**
-     * @var string
-     */
-    protected $resourceName;
-
-    /**
-     * This is the resource name ("resources", "assets") or the table name.
+     * This is the resource name ("resources", "assets").
      *
-     * @deprecated
      * @var string
      */
     protected $objectType;
@@ -143,15 +120,14 @@ abstract class AbstractReader implements Reader, Configurable, Parametrizable
 
     /**
      * Reader constructor.
+     *
+     * @param ServiceLocatorInterface $serviceLocator
      */
     public function __construct(ServiceLocatorInterface $services)
     {
         $this->setServiceLocator($services);
         $config = $services->get('Config');
         $this->basePath = $config['file_store']['local']['base_path'] ?: (OMEKA_PATH . '/files');
-        $plugins = $services->get('ControllerPluginManager');
-        $this->bulk = $plugins->get('bulk');
-        $this->bulkFile = $plugins->get('bulkFile');
         $this->metaMapper = $services->get('Bulk\MetaMapper');
     }
 
@@ -160,22 +136,9 @@ abstract class AbstractReader implements Reader, Configurable, Parametrizable
         return $this->label;
     }
 
-    public function setLogger(Logger $logger): self
-    {
-        $this->logger = $logger;
-        return $this;
-    }
-
     public function isValid(): bool
     {
-        if (!$this->lastErrorMessage) {
-            return true;
-        } elseif ($this->lastErrorMessage instanceof PsrMessage) {
-            $this->logger->err($this->lastErrorMessage->getMessage(), $this->lastErrorMessage->getContext());
-        } elseif (!is_bool($this->lastErrorMessage)) {
-            $this->logger->err($this->lastErrorMessage);
-        }
-        return false;
+        return true;
     }
 
     public function getLastErrorMessage(): ?string
@@ -218,11 +181,9 @@ abstract class AbstractReader implements Reader, Configurable, Parametrizable
         return $this;
     }
 
-    public function setResourceName(string $resourceName): self
+    public function setObjectType($objectType): self
     {
-        $this->resourceName = $resourceName;
-        // TODO Remove object type.
-        $this->objectType = $resourceName;
+        $this->objectType = $objectType;
         return $this;
     }
 
@@ -309,7 +270,6 @@ abstract class AbstractReader implements Reader, Configurable, Parametrizable
             $this->currentData,
             $this->key(),
             $this->availableFields,
-            // TODO Remove metamapper.
             $this->getParams() + ['metaMapper' => $this->metaMapper]
         );
     }

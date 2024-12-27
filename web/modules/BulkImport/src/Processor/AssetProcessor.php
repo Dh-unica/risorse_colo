@@ -7,10 +7,10 @@ use BulkImport\Form\Processor\AssetProcessorConfigForm;
 use BulkImport\Form\Processor\AssetProcessorParamsForm;
 use BulkImport\Interfaces\Configurable;
 use BulkImport\Interfaces\Parametrizable;
-use BulkImport\Stdlib\MessageStore;
-use Common\Stdlib\PsrMessage;
+use Log\Stdlib\PsrMessage;
 use Omeka\Api\Exception\ValidationException;
 use Omeka\Api\Representation\AssetRepresentation;
+use Omeka\Stdlib\ErrorStore;
 
 class AssetProcessor extends AbstractResourceProcessor implements Configurable, Parametrizable
 {
@@ -27,26 +27,42 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
      *
      * @var array
      */
-    protected $fieldTypes = [
-        // Common metadata.
-        'resource_name' => 'string',
-        // "o:id" may be an identifier.
-        'o:id' => 'string',
-        'o:created' => 'datetime',
-        'o:modified' => 'datetime',
-        'o:owner' => 'entity',
-        // Alias of "o:owner" here.
-        'o:email' => 'entity',
-        // TODO Use all data names and storage ids from data to find existing assets before update. Keep source data as a key of resource to simplify process.
-        'file' => 'string',
-        'url' => 'string',
-        // The name should be set after file/url to set it according to param.
-        'o:name' => 'string',
-        'o:storage_id' => 'string',
-        'o:media_type' => 'string',
-        'o:alt_text' => 'string',
-        // To attach as thumbnail for resources.
-        'o:resource' => 'entities',
+    protected $metadataData = [
+        // Assets metadata and file.
+        'fields' => [
+            'file',
+            'url',
+            'o:id',
+            'o:name',
+            'o:storage_id',
+            'o:owner',
+            'o:alt_text',
+            // To attach resources.
+            'o:resource',
+        ],
+        'skip' => [],
+        'boolean' => [],
+        'single_data' => [
+            'resource_name' => null,
+            'file' => null,
+            'url' => null,
+            // Generic.
+            'o:id' => null,
+            // Asset.
+            'o:name' => null,
+            'o:media_type' => null,
+            'o:storage_id' => null,
+            'o:alt_text' => null,
+        ],
+        'single_entity' => [
+            // Generic.
+            'o:owner' => null,
+        ],
+        'multiple_entities' => [
+            // Attached resources for thumbnails.
+            // TODO Fill resource for assets early.
+            // 'o:resource' => null,
+        ],
     ];
 
     protected function handleFormGeneric(ArrayObject $args, array $values): self
@@ -59,8 +75,6 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
             'action' => null,
             'action_unidentified' => null,
             'identifier_name' => null,
-
-            'asset_name' => 'filename',
 
             'o:owner' => null,
         ];
@@ -84,7 +98,6 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
             self::ACTION_DELETE,
             self::ACTION_SKIP,
         ])) {
-            ++$this->totalErrors;
             $this->logger->err(
                 'Action "{action}" is not managed.', // @translate
                 ['action' => $this->action]
@@ -93,7 +106,7 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
         return $this;
     }
 
-    protected function prepareBaseEntitySpecific(ArrayObject $resource): self
+    protected function baseSpecific(ArrayObject $resource): self
     {
         $resource['resource_name'] = 'assets';
 
@@ -116,23 +129,72 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
         return $this;
     }
 
-    protected function fillResourceSpecific(ArrayObject $resource, array $data): self
+    protected function fillResource(ArrayObject $resource, array $map, array $values): self
     {
-        foreach ($resource->getArrayCopy() as $field => $values) switch ($field) {
+        $field = $map['to']['field'] ?? null;
+
+        switch ($field) {
             default:
-                continue 2;
+                break;
+
+            case 'o:id':
+                $value = (int) end($values);
+                if (!$value) {
+                    break;
+                }
+                $id = empty($this->identifiers['mapx'][$resource['source_index']])
+                    ? $this->bulk->api()->searchOne('assets', ['id' => $value])->getContent()
+                    : (int) strtok((string) $this->identifiers['mapx'][$resource['source_index']], '§');
+                if ($id) {
+                    $resource['o:id'] = is_object($id) ? $id->id() : $id;
+                    $resource['checked_id'] = true;
+                } else {
+                    $resource['messageStore']->addError('resource', new PsrMessage(
+                        'Source index #{index}: Internal id cannot be found. The entry is skipped.', // @translate
+                        ['index' => $resource['source_index']]
+                    ));
+                }
+                break;
+
+            case 'o:owner':
+                $value = end($values);
+                if (!$value) {
+                    break;
+                }
+                if (is_array($value)) {
+                    $id = empty($value['o:id']) ? null : $value['o:id'];
+                    $email = empty($value['o:email']) ? null : $value['o:email'];
+                    $value = $id ?? $email ?? reset($value);
+                }
+                $id = $this->bulk->getUserId($value);
+                if ($id) {
+                    $resource['o:owner'] = empty($email)
+                        ? ['o:id' => $id]
+                        : ['o:id' => $id, 'o:email' => $email];
+                } else {
+                    $resource['messageStore']->addError('values', new PsrMessage(
+                        'The user "{source}" does not exist.', // @translate
+                        ['source' => $value]
+                    ));
+                }
+                break;
+
+            case 'o:name':
+                $value = end($values);
+                if ($value) {
+                    $resource[$field] = $value;
+                }
+                break;
 
             case 'o:storage_id':
-                $value = $values;
+                $value = (int) end($values);
                 if (!$value) {
-                    $resource['o:storage_id'] = null;
-                    continue 2;
+                    break;
                 }
-                // Use the storage id to get the id, since it is unique.
                 try {
-                    $id = $this->bulkIdentifiers->getIdFromIndex($resource['source_index'])
-                        // Read does not allow to return scalar.
-                        ?: $this->api->read('assets', ['storage_id' => $value])->getContent();
+                    $id = empty($this->identifiers['mapx'][$resource['source_index']])
+                        ? $this->bulk->api()->read('assets', ['storage_id' => $value])->getContent()
+                        : (int) strtok((string) $this->identifiers['mapx'][$resource['source_index']], '§');
                 } catch (\Exception $e) {
                     $id = null;
                 }
@@ -140,19 +202,16 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
                     $resource['o:id'] = is_object($id) ? $id->id() : $id;
                     $resource['checked_id'] = true;
                 } else {
-                    $resource['o:id'] = $resource['o:id'] ?? null;
                     $resource['messageStore']->addError('resource', new PsrMessage(
                         'Source index #{index}: Storage id cannot be found. The entry is skipped.', // @translate
                         ['index' => $resource['source_index']]
                     ));
                 }
-                continue 2;
+                break;
 
             case 'o:media_type':
-                $value = $values;
-                if (!$value) {
-                    $resource[$field] = null;
-                } else {
+                $value = end($values);
+                if ($value) {
                     if (preg_match('~(?:application|image|audio|video|model|text)/[\w.+-]+~', $value)) {
                         $resource[$field] = $value;
                     } else {
@@ -162,15 +221,25 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
                         ));
                     }
                 }
-                continue 2;
+                break;
+
+            case 'o:alt_text':
+                $value = end($values);
+                $resource[$field] = $value;
+                break;
 
             case 'url':
+                $value = end($values);
+                if ($value) {
+                    $resource['o:ingester'] = 'url';
+                    $resource['ingest_url'] = $value;
+                }
+                break;
+
             case 'file':
-                $value = $values;
+                $value = end($values);
                 if (!$value) {
-                    $resource['o:ingester'] = null;
-                    $resource['ingest_url'] = null;
-                    $resource['ingest_filename'] = null;
+                    break;
                 } elseif ($this->bulk->isUrl($value)) {
                     $resource['o:ingester'] = 'url';
                     $resource['ingest_url'] = $value;
@@ -178,71 +247,32 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
                     $resource['o:ingester'] = 'sideload';
                     $resource['ingest_filename'] = $value;
                 }
-                continue 2;
+                break;
 
             case 'o:resource':
-                // This is an entity: data are not yet filled inside resource.
-                $resource['o:resource'] = [];
-                $values = $data['o:resource'] ?? [];
+                $identifierNames = $this->bulk->getIdentifierNames();
                 // Check values one by one to manage source identifiers.
-                foreach (array_filter($values) as $key => $value) {
-                    // May be ["o:id" => "identifier"].
-                    if (is_array($value)) {
-                        $value = reset($value);
-                        if (!$value) {
-                            continue;
-                        }
-                    }
-                    $storedId = $this->bulkIdentifiers->getId($value, 'resources');
-                    if ($storedId) {
-                        $resource['o:resource'][$key] = [
-                            'o:id' => $storedId,
+                foreach ($values as $value) {
+                    $humbnailForResourceId = $this->bulk->findResourcesFromIdentifiers($value, $identifierNames, 'resources', $resource['messageStore']);
+                    if ($humbnailForResourceId) {
+                        $resource['o:resource'][] = [
+                            'o:id' => $humbnailForResourceId,
                             'checked_id' => true,
-                            'source_identifier' => $value,
+                            // TODO Set the source identifier anywhere.
                         ];
-                    } elseif ($thumbnailForResourceId = $this->bulkIdentifiers->findResourcesFromIdentifiers($value, $this->identifierNames, 'resources', $resource['messageStore'])) {
-                        $resource['o:resource'][$key] = [
-                            'o:id' => $thumbnailForResourceId,
+                    } elseif (!empty($this->identifiers['map'][$value . '§resources'])) {
+                        $resource['o:resource'][] = [
+                            'o:id' => (int) strtok((string) $this->identifiers['map'][$value . '§resources'], '§'),
                             'checked_id' => true,
                             'source_identifier' => $value,
                         ];
                     } else {
                         // Only for first loop. Normally not possible after: all
                         // identifiers are stored in the list "map" during first loop.
-                        $valueForMsg = mb_strlen($value) > 50 ? mb_substr($value, 0, 50) . '…' : $value;
                         $resource['messageStore']->addError('values', new PsrMessage(
-                            'The value "{value}" is not a resource (field "{field}").', // @translate
-                            ['value' => $valueForMsg, 'field' => $field]
+                            'The value "{value}" is not a resource.', // @translate
+                            ['value' => mb_substr((string) $value, 0, 50)]
                         ));
-                    }
-                }
-                continue 2;
-
-            case 'o:name':
-                if ($resource['o:name'] === null || $resource['o:name'] === '') {
-                    // According to list of fields, the url/file is already filled.
-                    $setAssetName = $this->getParam('asset_name', 'filename');
-                    switch ($setAssetName) {
-                        default:
-                        case 'filename':
-                            $resource['o:name'] = $resource['ingest_url'] ?? $resource['ingest_filename'] ?? null;
-                            $resource['o:name'] = $resource['o:name'] ? basename($resource['o:name']) : null;
-                            break;
-                        case 'filename_url':
-                            if (!empty($resource['ingest_url'])) {
-                                $resource['o:name'] = $resource['ingest_url'];
-                            } elseif (!empty($resource['ingest_filename'])) {
-                                $resource['o:name'] = basename($resource['ingest_filename']);
-                            }
-                            break;
-                        case 'full':
-                            $resource['o:name'] = $resource['ingest_url'] ?? $resource['ingest_filename'] ?? null;
-                            break;
-                        case 'none':
-                            break;
-                    }
-                    if ($resource['o:name'] === '') {
-                        $resource['o:name'] = null;
                     }
                 }
                 break;
@@ -268,7 +298,7 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
             } else {
                 $resource['o:name'] = trim((string) $resource['o:name']);
             }
-        } elseif (array_key_exists('o:name', $resource->getArrayCopy())) {
+        } elseif (array_key_exists('o:name', $resource)) {
             $resource['o:name'] = trim((string) $resource['o:name']);
         }
 
@@ -279,29 +309,43 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
      * Process creation of resources.
      *
      * Assets require an uploaded file, so bypass api and parent method.
-     *
-     * @return array Created resources.
      */
-    protected function createEntity(array $resource): ?AssetRepresentation
+    protected function createResources($resourceName, array $dataResources): self
     {
-        $asset = $this->createAsset($resource);
-
-        if (!$asset) {
-            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
-            ++$this->totalErrors;
-            return null;
+        if (!count($dataResources)) {
+            return $this;
         }
 
-        $this->bulkIdentifiers->storeSourceIdentifiersIds($resource, $asset);
-        $this->logger->notice(
-            'Index #{index}: Created {resource_name} #{resource_id}', // @translate
-            ['index' => $this->indexResource, 'resource_name' => $this->easyMeta->resourceLabel('assets'), 'resource_id' => $asset->id()]
-        );
+        $this->checkAssetMediaType = true;
 
-        $resource['o:id'] = $asset->id();
-        $this->updateThumbnailForResources($resource);
+        $baseResource = $this->baseEntity();
+        $messageStore = $baseResource['messageStore'];
 
-        return $asset;
+        $resources = [];
+        foreach ($dataResources as $dataResource) {
+            $resource = $this->createAsset($dataResource, $messageStore);
+            if (!$resource) {
+                $this->logCheckedResource($baseResource);
+                ++$this->totalErrors;
+                return $this;
+            }
+
+            $resources[$resource->id()] = $resource;
+            $this->storeSourceIdentifiersIds($dataResource, $resource);
+            $this->logger->notice(
+                'Index #{index}: Created {resource_name} #{resource_id}', // @translate
+                ['index' => $this->indexResource, 'resource_name' => $this->bulk->label($resourceName), 'resource_id' => $resource->id()]
+            );
+
+            $dataResource['o:id'] = $resource->id();
+            if (!$this->updateThumbnailForResources($dataResource)) {
+                return $this;
+            }
+        }
+
+        $this->recordCreatedResources($resources);
+
+        return $this;
     }
 
     /**
@@ -312,19 +356,14 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
      *
      * @todo Factorize with \BulkImport\Processor\ResourceProcessor::createAssetFromUrl()
      */
-    protected function createAsset(array $resource): ?AssetRepresentation
+    protected function createAsset(array $dataResource, ErrorStore $messageStore): ?AssetRepresentation
     {
-        $resource['messageStore'] = $resource['messageStore'] ?? new MessageStore();
-
-        $resource = $this->bulkIdentifiers->completeResourceIdentifierIds($resource);
-
+        $dataResource = $this->completeResourceIdentifierIds($dataResource);
         // TODO Clarify use of ingester and allows any ingester for assets.
-        $pathOrUrl = $resource['url'] ?? $resource['file']
-            ?? $resource['ingest_url'] ?? $resource['ingest_filename']
+        $pathOrUrl = $dataResource['url'] ?? $dataResource['file']
+            ?? $dataResource['ingest_url'] ?? $dataResource['ingest_filename']
             ?? null;
-
-        $this->bulkFile->setIsAsset(true);
-        $result = $this->bulkFile->checkFileOrUrl($pathOrUrl, $resource['messageStore']);
+        $result = $this->checkFileOrUrl($pathOrUrl, $messageStore);
         if (!$result) {
             return null;
         }
@@ -334,35 +373,47 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
         // TODO Set the real extension via tempFile().
         $extension = pathinfo($pathOrUrl, PATHINFO_EXTENSION);
 
-        // TODO Check why the asset for thumbnail of the resource is not prepared when it is a url. See ResourceProcessor.
-        $result = $this->bulkFile->fetchAndStore(
-            'asset',
-            $filename,
-            $filename,
-            $storageId,
-            $extension,
-            $pathOrUrl
-        );
-
-        if ($result['status'] !== 'success') {
-            $resource['messageStore']->addError('file', $result['message']);
-            return null;
+        $isUrl = $this->bulk->isUrl($pathOrUrl);
+        if ($isUrl) {
+            // TODO Check why the asset for thumbnail of the resource is not prepared when it is a url. See ResourceProcessor.
+            $result = $this->fetchFile(
+                'asset',
+                $filename,
+                $filename,
+                $storageId,
+                $extension,
+                $pathOrUrl
+            );
+            if ($result['status'] !== 'success') {
+                $messageStore->addError('file', $result['message']);
+                return null;
+            }
+            $fullPath = $result['data']['fullpath'];
+        } else {
+            // TODO Factorize with FileTrait, AssetProcessor and ResourceProcessor.
+            // TODO Use fetchFile() to manage any file.
+            $isAbsolutePathInsideDir = strpos($pathOrUrl, $this->sideloadPath) === 0;
+            $fileinfo = $isAbsolutePathInsideDir
+                ? new \SplFileInfo($pathOrUrl)
+                : new \SplFileInfo($this->sideloadPath . DIRECTORY_SEPARATOR . $pathOrUrl);
+            $realPath = $fileinfo->getRealPath();
+            $this->store->put($realPath, 'asset/' . $storageId . '.' . $extension);
+            $fullPath = $this->basePath . '/asset/' . $storageId . '.' . $extension;
         }
 
-        $fullPath = $result['data']['fullpath'];
-
-        $mediaType = $this->bulkFile->getMediaType($fullPath);
-
+        // A check to get the real media-type and extension.
+        $finfo = new \finfo(FILEINFO_MIME_TYPE);
+        $mediaType = $finfo->file($fullPath);
+        $mediaType = \Omeka\File\TempFile::MEDIA_TYPE_ALIASES[$mediaType] ?? $mediaType;
         // TODO Get the extension from the media type or use standard asset uploaded.
 
         // This doctrine resource should be reloaded each time the entity
         // manager is cleared, else a error may occur on big import.
         $entityManager = $this->getServiceLocator()->get('Omeka\EntityManager');
-        $owner = $entityManager->find(\Omeka\Entity\User::class, $resource['o:owner']['o:id'] ?? $this->userId);
+        $owner = $entityManager->find(\Omeka\Entity\User::class, $dataResource['o:owner']['o:id'] ?? $this->userId);
 
-        $isUrl = $this->bulk->isUrl($pathOrUrl);
-        $name = strlen(trim((string) ($resource['o:name'] ?? '')))
-            ? trim($resource['o:name'])
+        $name = strlen(trim((string) ($dataResource['o:name'] ?? '')))
+            ? trim($dataResource['o:name'])
             : ($isUrl ? $pathOrUrl : $filename);
 
         $asset = new \Omeka\Entity\Asset;
@@ -372,7 +423,7 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
         $asset->setStorageId($storageId);
         $asset->setExtension($extension);
         $asset->setMediaType($mediaType);
-        $asset->setAltText($resource['o:alt_text'] ?? null);
+        $asset->setAltText($dataResource['o:alt_text'] ?? null);
 
         // TODO Remove this flush (required because there is a clear() after checks).
         $entityManager->persist($asset);
@@ -382,87 +433,115 @@ class AssetProcessor extends AbstractResourceProcessor implements Configurable, 
     }
 
     /**
-     * Only name and alt text are update for now (see api AssetAdapter).
-     * Thumbnails of resources are updatable too.
-     *
-     * @see \BulkImport\Mvc\Controller\Plugin\UpdateResource
+     * @see \BulkImport\Processor\ResourceUpdateTrait
      */
-    protected function updateDataAsset(array $resource): array
+    protected function updateDataAsset($resourceName, array $dataResource): array
     {
         // Unlike resource, the only fields updatable via standard methods are
         // name, alternative text and attached resources.
-        $resource['messageStore'] = $resource['messageStore'] ?? new MessageStore();
 
         // Always reload the resource that is currently managed to manage
         // multiple update of the same resource.
         try {
-            $this->api->read('assets', $resource['o:id'], [], ['responseContent' => 'resource'])->getContent();
+            $this->bulk->api()->read('assets', $dataResource['o:id'], [], ['responseContent' => 'resource'])->getContent();
         } catch (\Exception $e) {
             // Normally already checked.
-            $resource['messageStore']->addError('resource', new PsrMessage(
+            $r = $this->baseEntity();
+            $r['messageStore']->addError('resource', new PsrMessage(
                 'Index #{index}: The resource {resource} #{id} is not available and cannot be updated.', // @translate
-                ['index' => $this->indexResource, 'resource' => 'asset', 'id', $resource['o:id']]
+                ['index' => $this->indexResource, 'resource' => 'asset', 'id', $dataResource['o:id']]
             ));
-            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
+            $this->logCheckedResource($r);
             ++$this->totalErrors;
             return null;
         }
 
         // A name is required.
 
-        return $resource;
+        return $dataResource;
     }
 
-    protected function updateThumbnailForResources(array $resource): self
+    protected function updateThumbnailForResources(array $dataResource)
     {
-        // Here, the resource is an asset.
-
-        if (empty($resource['o:resource'])) {
-            return $this;
-        }
-
         // The id is required to attach the asset to a resource.
-        if (empty($resource['o:id'])) {
+        if (empty($dataResource['o:id'])) {
             return $this;
         }
+
+        $api = clone $this->bulk->api(null, true);
 
         // Attach asset to the resources.
-        $resourcesToUpdateThumbnail = [];
-        foreach ($resource['o:resource'] as $resourceForThumbnail) {
+        $thumbnailResources = [];
+        foreach ($dataResource['o:resource'] ?? [] as $thumbnailResource) {
             // Normally checked early.
-            if (empty($resourceForThumbnail['resource_name']) || $resourceForThumbnail['resource_name'] === 'resources') {
+            if (empty($thumbnailResource['resource_name'])) {
                 try {
-                    $resourceForThumbnail['resource_name'] = $this->api->read('resources', $resourceForThumbnail['o:id'], [], ['responseContent' => 'resource'])->getContent()
+                    $thumbnailResource['resource_name'] = $api->read('resources', $thumbnailResource['o:id'], [], ['responseContent' => 'resource'])->getContent()
                         ->getResourceName();
                 } catch (\Exception $e) {
-                    $resource['messageStore']->addError('resource', new PsrMessage(
-                        'The resource #{resource_id} for asset #{asset_id} does not exist and cannot be updated.', // @translate
-                        ['resource_id' => $resourceForThumbnail['o:id'], 'asset_id' => $resource['o:id']]
+                    $r = $this->baseEntity();
+                    $r['messageStore']->addError('resource', new PsrMessage(
+                        'The resource #{resource_id} for asset #{asset_id} does not exist.', // @translate
+                        ['resource_id' => $thumbnailResource['o:id'], 'asset_id' => $dataResource['o:id']]
                     ));
                     $messages = $this->listValidationMessages(new ValidationException($e->getMessage()));
-                    $resource['messageStore']->addError('resource', $messages);
-                    $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
+                    $r['messageStore']->addError('resource', $messages);
+                    $this->logCheckedResource($r);
                     ++$this->totalErrors;
-                    return $this;
+                    return null;
                 }
             }
-            $resourceForThumbnail['o:thumbnail'] = ['o:id' => $resource['o:id']];
-            $resourcesToUpdateThumbnail[] = $resourceForThumbnail;
+            $thumbnailResource['o:thumbnail'] = ['o:id' => $dataResource['o:id']];
+            $thumbnailResources[] = $thumbnailResource;
         }
 
-        // TODO Isolate the processes of updating resource thumbnails from assets.
+        // TODO Isolate the processes.
         $assetAction = $this->action;
         $this->action = self::ACTION_SUB_UPDATE;
-        foreach ($resourcesToUpdateThumbnail as $key => $resourceForThumbnail) {
-            $resourceForThumbnail['messageStore'] = $resourceForThumbnail['messageStore'] ?? $resource['messageStore'] ?? new MessageStore();
-            // These resources are logged with a negative index to avoid to
-            // override assets.
-            // This is normally useless anyway.
-            $resourceForThumbnail['source_index'] = -(++$key);
-            $this->updateEntity($resourceForThumbnail);
-        }
+        $this->updateResources('resources', $thumbnailResources);
         $this->action = $assetAction;
-
         return $this;
+    }
+
+    protected function findAssetsFromIdentifiers(array $identifiers, $identifierNames): array
+    {
+        // There are only two unique columns in assets and the table is
+        // generally small and the api doesn't allow to search them, so extract
+        // them all. The name is allowed too, even if not unique.
+
+        if (!$identifiers || !$identifierNames) {
+            return [];
+        }
+
+        $idNames = [];
+        if (in_array('o:name', $identifierNames)) {
+            $idNames = $this->bulk->api()->search('assets', [], ['returnScalar' => 'name'])->getContent();
+        }
+        $idStorages = [];
+        if (in_array('o:storage_id', $identifierNames)) {
+            $idStorages = $this->bulk->api()->search('assets', [], ['returnScalar' => 'storageId'])->getContent();
+        }
+        if (empty($idNames) && empty($idStorages)) {
+            return [];
+        }
+
+        $result = array_fill_keys($identifiers, null);
+
+        // Start by name to override it because it is not unique.
+        if (in_array('o:name', $identifierNames)) {
+            $result = array_replace($result, array_flip($idNames));
+        }
+
+        if (in_array('o:storage_id', $identifierNames)) {
+            $result = array_replace($result, array_flip($idStorages));
+        }
+
+        if (in_array('o:id', $identifierNames)) {
+            $ids = array_keys($idStorages ?: $idNames);
+            $ids = array_combine($ids, $ids);
+            $result = array_replace($result, $ids);
+        }
+
+        return $result;
     }
 }

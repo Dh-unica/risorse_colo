@@ -747,7 +747,7 @@ class EprintsProcessor extends AbstractFullProcessor
                 $this->tableData[$table] = $this->reader
                     ->setFilters([])
                     ->setOrders([['by' => 'eprintid'], ['by' => 'pos']])
-                    ->setResourceName($table)
+                    ->setObjectType($table)
                     ->fetchAll();
             } catch (\Exception $e) {
                 $this->tableData[$table] = [];
@@ -759,7 +759,7 @@ class EprintsProcessor extends AbstractFullProcessor
                 $this->tableDataBy[$table] = $this->reader
                     ->setFilters([])
                     ->setOrders([['by' => 'eprintid'], ['by' => 'pos']])
-                    ->setResourceName($table)
+                    ->setObjectType($table)
                     ->fetchAll(null, 'eprintid');
             } catch (\Exception $e) {
                 $this->tableDataBy[$table] = [];
@@ -772,7 +772,7 @@ class EprintsProcessor extends AbstractFullProcessor
             $this->tableData['directors'] = $this->reader
                 ->setFilters([])
                 ->setOrders([['by' => 'eprintid']])
-                ->setResourceName('eprint')
+                ->setObjectType('eprint')
                 ->fetchAll(['eprintid', 'director_family', 'director_given', 'director_lineage', 'director_honourific']);
         } catch (\Exception $e) {
             $this->tableData['directors'] = [];
@@ -782,7 +782,7 @@ class EprintsProcessor extends AbstractFullProcessor
             $this->tableDataBy['directors'] = $this->reader
                 ->setFilters([])
                 ->setOrders([['by' => 'eprintid']])
-                ->setResourceName('eprint')
+                ->setObjectType('eprint')
                 ->fetchAll(['eprintid', 'director_family', 'director_given', 'director_lineage', 'director_honourific'], 'eprintid');
         } catch (\Exception $e) {
             $this->tableDataBy['directors'] = [];
@@ -873,7 +873,7 @@ class EprintsProcessor extends AbstractFullProcessor
         $roots = $this->reader
             ->setFilters(['parents = "ROOT"'])
             ->setOrders([['by' => 'subjectid'], ['by' => 'pos'], ['by' => 'parents']])
-            ->setResourceName('subject_parents')
+            ->setObjectType('subject_parents')
             ->fetchAllKeyValues('subjectid');
 
         $ids = $this
@@ -1011,8 +1011,8 @@ class EprintsProcessor extends AbstractFullProcessor
         }
 
         $emptyKeyId = array_fill_keys(array_keys($keyId), null);
-        $classId = empty($this->mapping[$sourceType]['resource_class_id']) ? null : $this->easyMeta->resourceClassId($this->mapping[$sourceType]['resource_class_id']);
-        $templateId = empty($this->mapping[$sourceType]['resource_template_id']) ? null : $this->easyMeta->resourceTemplateId($this->mapping[$sourceType]['resource_template_id']);
+        $classId = empty($this->mapping[$sourceType]['resource_class_id']) ? null : $this->bulk->getResourceClassId($this->mapping[$sourceType]['resource_class_id']);
+        $templateId = empty($this->mapping[$sourceType]['resource_template_id']) ? null : $this->bulk->getResourceTemplateId($this->mapping[$sourceType]['resource_template_id']);
         $thumbnailId = $this->mapping[$sourceType]['thumbnail_id'] ?? null;
 
         $created = 0;
@@ -2797,7 +2797,7 @@ class EprintsProcessor extends AbstractFullProcessor
         $this->orderAndAppendValues($values);
 
         $messageStore = new MessageStore();
-        $isFileAvailable = $this->bulkFile->checkFileOrUrl($sourceFile, $messageStore);
+        $isFileAvailable = $this->checkFileOrUrl($sourceFile, $messageStore);
         if (!$isFileAvailable) {
             // No stop in order to update other metadata, in particular item,
             // and usually, file are fetched later.
@@ -2810,7 +2810,7 @@ class EprintsProcessor extends AbstractFullProcessor
 
         $result = false;
         if ($isFileAvailable) {
-            $result = $this->bulkFile->fetchAndStore('original', $source['fichier'], $source['fichier'], $storageId, $extension, $sourceFile);
+            $result = $this->fetchFile('original', $source['fichier'], $source['fichier'], $storageId, $extension, $sourceFile);
             if ($result) {
                 $this->entity->setStorageId($storageId);
                 $this->entity->setExtension(mb_strtolower($extension));
@@ -2936,27 +2936,27 @@ class EprintsProcessor extends AbstractFullProcessor
         $depositables = $this->reader
             ->setFilters([])
             ->setOrders([['by' => 'subjectid']])
-            ->setResourceName('subject')
+            ->setObjectType('subject')
             ->fetchAllKeyValues('subjectid', 'depositable');
         $nameByIds = $this->reader
             ->setFilters([])
             ->setOrders([['by' => 'subjectid'], ['by' => 'pos'], ['by' => 'name_name']])
-            ->setResourceName('subject_name_name')
+            ->setObjectType('subject_name_name')
             ->fetchAll(null, 'subjectid');
         $langByIds = $this->reader
             ->setFilters([])
             ->setOrders([['by' => 'subjectid'], ['by' => 'pos'], ['by' => 'name_lang']])
-            ->setResourceName('subject_name_lang')
+            ->setObjectType('subject_name_lang')
             ->fetchAll(null, 'subjectid');
         $parents = $this->reader
             ->setFilters([])
             ->setOrders([['by' => 'subjectid'], ['by' => 'pos'], ['by' => 'parents']])
-            ->setResourceName('subject_parents')
+            ->setObjectType('subject_parents')
             ->fetchAll();
         $ancestorByIds = $this->reader
             ->setFilters([])
             ->setOrders([['by' => 'subjectid'], ['by' => 'pos'], ['by' => 'ancestors']])
-            ->setResourceName('subject_ancestors')
+            ->setObjectType('subject_ancestors')
             ->fetchAll(null, 'subjectid');
         // Reset the reader.
         $this->prepareReader('concepts');

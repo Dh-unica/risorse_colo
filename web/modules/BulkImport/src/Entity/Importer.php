@@ -24,6 +24,69 @@ class Importer extends AbstractEntity
     protected $id;
 
     /**
+     * @var string
+     *
+     * @Column(
+     *     type="string",
+     *     nullable=true,
+     *     length=190
+     * )
+     */
+    protected $label;
+
+    /**
+     * @var array
+     *
+     * @Column(
+     *      type="json",
+     *      nullable=false
+     * )
+     */
+    protected $config;
+
+    /**
+     * @var string
+     *
+     * @Column(
+     *     type="string",
+     *     nullable=true,
+     *     length=190
+     * )
+     */
+    protected $readerClass;
+
+    /**
+     * @var array
+     *
+     * @Column(
+     *     type="json",
+     *     nullable=true
+     * )
+     */
+    protected $readerConfig;
+
+    /**
+     * @var string
+     *
+     * @Column(
+     *     type="string",
+     *     nullable=true,
+     *     length=190
+     * )
+     */
+    protected $processorClass;
+
+    /**
+     * @var array
+     *
+     * @Column(
+     *      type="json",
+     *      nullable=true
+     * )
+     */
+    protected $processorConfig;
+
+    /**
      * @var User
      *
      * @ManyToOne(
@@ -35,60 +98,6 @@ class Importer extends AbstractEntity
      * )
      */
     protected $owner;
-
-    /**
-     * @var string
-     *
-     * @Column(
-     *     type="string",
-     *     nullable=false,
-     *     length=190
-     * )
-     */
-    protected $label;
-
-    /**
-     * @var string
-     *
-     * @Column(
-     *     type="string",
-     *     nullable=false,
-     *     length=190
-     * )
-     */
-    protected $reader;
-
-    /**
-     * @var string
-     *
-     * @Column(
-     *     type="string",
-     *     nullable=true,
-     *     length=190
-     * )
-     */
-    protected $mapper;
-
-    /**
-     * @var string
-     *
-     * @Column(
-     *     type="string",
-     *     nullable=false,
-     *     length=190
-     * )
-     */
-    protected $processor;
-
-    /**
-     * @var array
-     *
-     * @Column(
-     *      type="json",
-     *      nullable=false
-     * )
-     */
-    protected $config;
 
     /**
      * @var Import[]|ArrayCollection
@@ -113,59 +122,15 @@ class Importer extends AbstractEntity
         return $this->id;
     }
 
-    public function setOwner(?User $owner = null): self
-    {
-        $this->owner = $owner;
-        return $this;
-    }
-
-    public function getOwner(): ?User
-    {
-        return $this->owner;
-    }
-
-    public function setLabel(string $label): self
+    public function setLabel(?string $label): self
     {
         $this->label = $label;
         return $this;
     }
 
-    public function getLabel(): string
+    public function getLabel(): ?string
     {
         return $this->label;
-    }
-
-    public function setReader(string $reader): self
-    {
-        $this->reader = $reader;
-        return $this;
-    }
-
-    public function getReader(): string
-    {
-        return $this->reader;
-    }
-
-    public function setMapper(?string $mapper): self
-    {
-        $this->mapper = $mapper;
-        return $this;
-    }
-
-    public function getMapper(): ?string
-    {
-        return $this->mapper;
-    }
-
-    public function setProcessor(string $processor): self
-    {
-        $this->processor = $processor;
-        return $this;
-    }
-
-    public function getProcessor(): string
-    {
-        return $this->processor;
     }
 
     public function setConfig(array $config): self
@@ -177,6 +142,61 @@ class Importer extends AbstractEntity
     public function getConfig(): array
     {
         return $this->config;
+    }
+
+    public function setReaderClass(?string $readerClass): self
+    {
+        $this->readerClass = $readerClass;
+        return $this;
+    }
+
+    public function getReaderClass(): ?string
+    {
+        return $this->readerClass;
+    }
+
+    public function setReaderConfig(?array $readerConfig): self
+    {
+        $this->readerConfig = $readerConfig;
+        return $this;
+    }
+
+    public function getReaderConfig(): ?array
+    {
+        return $this->readerConfig;
+    }
+
+    public function setProcessorClass(?string $processorClass): self
+    {
+        $this->processorClass = $processorClass;
+        return $this;
+    }
+
+    public function getProcessorClass(): string
+    {
+        return $this->processorClass;
+    }
+
+    public function setProcessorConfig(?array $processorConfig): self
+    {
+        $this->processorConfig = $processorConfig;
+        return $this;
+    }
+
+    public function getProcessorConfig(): ?array
+    {
+        return $this->processorConfig;
+    }
+
+    public function setOwner(?User $owner = null): self
+    {
+        $this->owner = $owner;
+        return $this;
+    }
+
+    public function getOwner(): ?User
+    {
+        return $this->owner;
     }
 
     /**

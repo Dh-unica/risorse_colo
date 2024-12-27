@@ -6,7 +6,7 @@ use BulkImport\Entry\Entry;
 use BulkImport\Entry\SpreadsheetEntry;
 use BulkImport\Form\Reader\OpenDocumentSpreadsheetReaderConfigForm;
 use BulkImport\Form\Reader\OpenDocumentSpreadsheetReaderParamsForm;
-use Common\Stdlib\PsrMessage;
+use Log\Stdlib\PsrMessage;
 use OpenSpout\Common\Type;
 use OpenSpout\Reader\Common\Creator\ReaderEntityFactory;
 use OpenSpout\Reader\ReaderInterface;
@@ -96,7 +96,7 @@ class OpenDocumentSpreadsheetReader extends AbstractSpreadsheetFileReader
             );
         }
         if (!extension_loaded('zip') || !extension_loaded('xml')) {
-            return parent::isValid();
+            return false;
         }
         return parent::isValid();
     }
@@ -288,16 +288,6 @@ class OpenDocumentSpreadsheetReader extends AbstractSpreadsheetFileReader
         $this->spreadsheetReader->setShouldPreserveEmptyRows(true);
 
         $filepath = $this->getParam('filename');
-
-        // Avoid issue when the second step is reloaded.
-        if (!$filepath) {
-            throw new \Omeka\Service\Exception\RuntimeException(
-                (string) new PsrMessage(
-                    'The file cannot be open: restart the import if you uploaded a file manually.' // @translate
-                )
-            );
-        }
-
         try {
             $this->spreadsheetReader->open($filepath);
         } catch (\OpenSpout\Common\Exception\IOException $e) {
@@ -535,10 +525,5 @@ class OpenDocumentSpreadsheetReader extends AbstractSpreadsheetFileReader
         $this->availableFields = array_values(array_unique(array_merge(...array_values($this->availableFieldsMultiSheets))));
         $this->initializeReader();
         return $this;
-    }
-
-    protected function cleanData(array $data): array
-    {
-        return array_map([$this->bulk, 'trimUnicode'], $data);
     }
 }

@@ -6,8 +6,9 @@
     Concrètement, crée simplement les ressources sans modifier leur contenu
     de façon à pouvoir les traiter. Il supprime les éléments liés à la recherche SRU.
 
-    Cette feuille nécessite un fichier d'alignement, par exemple "unimarc_to_omeka.xml",
-    ou une configuration dans le module.
+    Contrairement à "sru.unimarc_to_omeka.xsl", cette feuille xsl ne permet pas
+    de créer directement des ressources Omeka. Elle nécessite un fichier d'alignement,
+    par exemple "unimarc_to_omeka.xml", ou une configuration dans le module.
 
     Exemple de fichier xml source : https://bu.unistra.fr/opac/sru?version=1.1&operation=searchRetrieve&query=(dc.source=BUSBN)and(dc.identifier=BUS4683173)&recordSchema=unimarcxml
 
@@ -50,7 +51,7 @@
     </xsl:template>
 
     <xsl:template match="record">
-        <resource wrapper="1">
+        <resource>
             <xsl:copy>
                 <xsl:apply-templates select="@*|node()"/>
             </xsl:copy>

@@ -8,7 +8,7 @@ use BulkImport\Entry\JsonEntry;
 use BulkImport\Form\Reader\JsonReaderConfigForm;
 use BulkImport\Form\Reader\JsonReaderParamsForm;
 use Laminas\Http\Response;
-use Common\Stdlib\PsrMessage;
+use Log\Stdlib\PsrMessage;
 
 /**
  * A full recursive array iterator is useless; it's mainly a paginator. Use yield? AppendGenerator?
@@ -20,6 +20,8 @@ use Common\Stdlib\PsrMessage;
  */
 class JsonReader extends AbstractPaginatedReader
 {
+    use HttpClientTrait;
+
     protected $label = 'Json';
     protected $configFormClass = JsonReaderConfigForm::class;
     protected $paramsFormClass = JsonReaderParamsForm::class;
@@ -41,11 +43,6 @@ class JsonReader extends AbstractPaginatedReader
     protected $mediaType = 'application/json';
 
     protected $charset = 'utf-8';
-
-    /**
-     * @var string
-     */
-    protected $endpoint;
 
     /**
      * @var ?string
@@ -109,23 +106,20 @@ class JsonReader extends AbstractPaginatedReader
         // TODO Do a early check of each file or url.
         // Validity will be checked for each file or url.
         if ($this->listFiles) {
-            return parent::isValid();
+            return true;
         }
 
-        $message = null;
         if (empty($this->params['url'])) {
-            if (!$this->bulkFile->isValidEndpoint('', '', [], $this->mediaType, $this->charset, $message)) {
-                $this->lastErrorMessage = $message;
-                return parent::isValid();
+            if (!$this->isValidUrl('', '', [], $this->mediaType, $this->charset)) {
+                return false;
             }
         } else {
-            if (!$this->bulkFile->isValidDirectUrl($this->params['url'], null, null, $message)) {
-                $this->lastErrorMessage = $message;
-                return parent::isValid();
+            if (!$this->isValidDirectUrl($this->params['url'])) {
+                return false;
             }
         }
 
-        return parent::isValid();
+        return true;
     }
 
     public function current()
@@ -143,7 +137,7 @@ class JsonReader extends AbstractPaginatedReader
                 ->convertToString('params', 'resource_url', $current);
             $this->metaMapper->setVariable('url_resource', $resourceUrl);
             if (!$this->listFiles) {
-                $current = $this->bulkFile->fetchUrlJson($resourceUrl);
+                $current = $this->fetchUrlJson($resourceUrl);
             }
         }
 
@@ -155,7 +149,7 @@ class JsonReader extends AbstractPaginatedReader
                     'File "{fileurl}" is not available.', // @translate
                     ['fileurl' => $current]
                 );
-                $this->logger->err(
+                $this->getServiceLocator()->get('Omeka\Logger')->err(
                     $this->lastErrorMessage->getMessage(),
                     $this->lastErrorMessage->getContext()
                 );
@@ -166,7 +160,7 @@ class JsonReader extends AbstractPaginatedReader
                     'File "{fileurl}" is empty.', // @translate
                     ['fileurl' => $current]
                 );
-                $this->logger->err(
+                $this->getServiceLocator()->get('Omeka\Logger')->err(
                     $this->lastErrorMessage->getMessage(),
                     $this->lastErrorMessage->getContext()
                 );
@@ -194,10 +188,9 @@ class JsonReader extends AbstractPaginatedReader
     }
 
     /**
-     * This method is called from the method setResourceName() and isValid().
+     * This method is called from the method setObjectType() and isValid().
      *
-     * @todo Move this reader to a paginated reader or make paginated reader the top reader.
-     * @todo The mapping config is used only to pass config (endpoint, path, subpath, resource_url, resource_root, resource_single, paginationa and other params). But these variables may be dynamic for some sources.
+     * @todo Merge with XmlReader::initArgs() (or move this reader to a paginated reader or make paginated reader the top reader).
      * @deprecated Use initializeReader only.
      */
     protected function initArgs(): self
@@ -217,7 +210,6 @@ class JsonReader extends AbstractPaginatedReader
 
         // Prepare specific data for the reader.
         $this->endpoint = $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'endpoint') ?: $this->getParam('url');
-        $this->bulkFile->setEndpoint($this->endpoint);
 
         // To manage complex pagination mechanism, the url can be transformed.
         $this->path = $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'path') ?: null;
@@ -256,9 +248,9 @@ class JsonReader extends AbstractPaginatedReader
         ) {
             $this->lastErrorMessage = new PsrMessage(
                 'Content-type "{content_type}" or charset "{charset}" is invalid for url "{url}".', // @translate
-                ['content_type' => $currentContentType->getMediaType(), 'charset' => $currentContentType->getCharset(), 'url' => $this->bulkFile->getLastRequestUrl()]
+                ['content_type' => $currentContentType->getMediaType(), 'charset' => $currentContentType->getCharset(), 'url' => $this->lastRequestUrl]
             );
-            $this->logger->err(
+            $this->getServiceLocator()->get('Omeka\Logger')->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -270,9 +262,9 @@ class JsonReader extends AbstractPaginatedReader
         if (!$this->currentResponse->isSuccess()) {
             $this->lastErrorMessage = new PsrMessage(
                 'Unable to fetch data for the page {page}, url "{url}".', // @translate
-                ['page' => $this->currentPage, 'url' => $this->bulkFile->getLastRequestUrl()]
+                ['page' => $this->currentPage, 'url' => $this->lastRequestUrl]
             );
-            $this->logger->err(
+            $this->getServiceLocator()->get('Omeka\Logger')->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -286,9 +278,9 @@ class JsonReader extends AbstractPaginatedReader
         if ($json && isset($json['errors']['error'])) {
             $this->lastErrorMessage = new PsrMessage(
                 'Unable to fetch data for the page {page} (url "{url}"): {error}.', // @translate
-                ['page' => $this->currentPage, 'url' => $this->bulkFile->getLastRequestUrl(), 'error' => $json['errors']['error']]
+                ['page' => $this->currentPage, 'url' => $this->lastRequestUrl, 'error' => $json['errors']['error']]
             );
-            $this->logger->err(
+            $this->getServiceLocator()->get('Omeka\Logger')->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -374,6 +366,6 @@ class JsonReader extends AbstractPaginatedReader
                 . (strlen((string) $path) ? '/' . $path : '')
                 . (strlen((string) $subpath) ? '/' . $subpath : '');
         }
-        return $this->bulkFile->fetchUrl($url, $params);
+        return $this->fetchUrl($url, $params);
     }
 }

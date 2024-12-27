@@ -379,7 +379,7 @@
               return "string";
             }
 
-            escaped = stream.next() == "\\" && embed;
+            escaped = embed && stream.next() == "\\";
           } else {
             stream.next();
             escaped = false;

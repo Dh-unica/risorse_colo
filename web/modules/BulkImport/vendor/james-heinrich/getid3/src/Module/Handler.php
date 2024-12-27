@@ -109,8 +109,6 @@ abstract class Handler {
 	}
 
 	/**
-	 * @phpstan-impure
-	 *
 	 * @return int|bool
 	 */
 	protected function ftell() {
@@ -122,8 +120,6 @@ abstract class Handler {
 
 	/**
 	 * @param int $bytes
-	 *
-	 * @phpstan-impure
 	 *
 	 * @return string|false
 	 *
@@ -170,8 +166,6 @@ abstract class Handler {
 	 * @param int $bytes
 	 * @param int $whence
 	 *
-	 * @phpstan-impure
-	 *
 	 * @return int
 	 *
 	 * @throws Exception
@@ -213,8 +207,6 @@ abstract class Handler {
 	}
 
 	/**
-	 * @phpstan-impure
-	 *
 	 * @return string|false
 	 *
 	 * @throws Exception
@@ -270,8 +262,6 @@ abstract class Handler {
 	}
 
 	/**
-	 * @phpstan-impure
-	 *
 	 * @return bool
 	 */
 	protected function feof() {

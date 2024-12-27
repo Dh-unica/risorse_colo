@@ -5,8 +5,8 @@ namespace BulkImport\Reader;
 use ArrayIterator;
 use BulkImport\Form\Reader\OmekaSReaderConfigForm;
 use BulkImport\Form\Reader\OmekaSReaderParamsForm;
-use Laminas\Http\Response as HttpResponse;
-use Common\Stdlib\PsrMessage;
+use Laminas\Http\Response;
+use Log\Stdlib\PsrMessage;
 
 /**
  * A full recursive array iterator is useless; it's mainly a paginator. Use yield? AppendGenerator?
@@ -19,6 +19,8 @@ use Common\Stdlib\PsrMessage;
  */
 class OmekaSReader extends AbstractPaginatedReader
 {
+    use HttpClientTrait;
+
     protected $label = 'Omeka S api';
     protected $configFormClass = OmekaSReaderConfigForm::class;
     protected $paramsFormClass = OmekaSReaderParamsForm::class;
@@ -51,11 +53,6 @@ class OmekaSReader extends AbstractPaginatedReader
     protected $queryCredentials;
 
     /**
-     * @var string
-     */
-    protected $endpoint;
-
-    /**
      * @var ?string
      */
     protected $path = null;
@@ -75,10 +72,10 @@ class OmekaSReader extends AbstractPaginatedReader
      */
     protected $baseUrl = '';
 
-    public function setResourceName(string $resourceName): self
+    public function setObjectType($objectType): self
     {
-        $this->path = $resourceName;
-        return parent::setResourceName($resourceName);
+        $this->path = $objectType;
+        return parent::setObjectType($objectType);
     }
 
     public function setQueryCredentials(array $credentials): self
@@ -109,10 +106,8 @@ class OmekaSReader extends AbstractPaginatedReader
     {
         $this->initArgs();
 
-        $message = null;
-        if (!$this->bulkFile->isValidEndpoint('-context', '', [], $this->mediaType, $this->charset, $message)) {
-            $this->lastErrorMessage = $message;
-            return parent::isValid();
+        if (!$this->isValidUrl('-context', '', [], $this->mediaType, $this->charset)) {
+            return false;
         }
 
         $urlHelper = $this->getServiceLocator()->get('ViewHelperManager')->get('url');
@@ -120,16 +115,19 @@ class OmekaSReader extends AbstractPaginatedReader
             $this->lastErrorMessage = new PsrMessage(
                 'It is useless to import Omeka S itself. Check your endpoint.' // @translate
             );
-            return parent::isValid();
+            $this->getServiceLocator()->get('Omeka\Logger')->warn(
+                $this->lastErrorMessage->getMessage(),
+                $this->lastErrorMessage->getContext()
+            );
+            return false;
         }
 
-        return parent::isValid();
+        return true;
     }
 
     protected function initArgs(): self
     {
-        $this->endpoint =rtrim($this->getParam('endpoint'), '/ ');
-        $this->bulkFile->setEndpoint($this->endpoint);
+        $this->endpoint = rtrim($this->getParam('endpoint'), '/ ');
         $this->queryCredentials = [];
         $keyIdentity = $this->getParam('key_identity');
         $keyCredential = $this->getParam('key_credential');
@@ -156,7 +154,7 @@ class OmekaSReader extends AbstractPaginatedReader
                     ['page' => $this->currentPage]
                 );
             }
-            $this->logger->err(
+            $this->getServiceLocator()->get('Omeka\Logger')->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -178,7 +176,7 @@ class OmekaSReader extends AbstractPaginatedReader
         $links = $this->currentResponse->getHeaders()->get('Link');
         if (!$links) {
             $this->lastErrorMessage = 'Header Link not found in response.'; // @translate
-            $this->logger->warn($this->lastErrorMessage);
+            $this->getServiceLocator()->get('Omeka\Logger')->warn($this->lastErrorMessage);
             return;
         }
 
@@ -199,7 +197,7 @@ class OmekaSReader extends AbstractPaginatedReader
         $links = $urls + ['first' => null, 'prev' => null, 'next' => null, 'last' => null];
         if (!$links['first']) {
             $this->lastErrorMessage = 'No links in http header.'; // @translate
-            $this->logger->warn($this->lastErrorMessage);
+            $this->getServiceLocator()->get('Omeka\Logger')->warn($this->lastErrorMessage);
             return;
         }
 
@@ -223,7 +221,7 @@ class OmekaSReader extends AbstractPaginatedReader
 
         if ($this->firstPage > $this->lastPage) {
             $this->lastErrorMessage = 'First page cannot be greater to last page.'; // @translate
-            $this->logger->err($this->lastErrorMessage);
+            $this->getServiceLocator()->get('Omeka\Logger')->err($this->lastErrorMessage);
             return;
         }
 
@@ -247,7 +245,7 @@ class OmekaSReader extends AbstractPaginatedReader
 
         // Prepare the base url.
         unset($query['page']);
-        $this->baseUrl = $this->bulkFile->unparseUrl($parts);
+        $this->baseUrl = $this->unparseUrl($parts);
 
         // The page is 1-based, but the index is 0-based, more common in loops.
         $this->currentPage = 1;
@@ -255,12 +253,8 @@ class OmekaSReader extends AbstractPaginatedReader
         $this->isValid = true;
     }
 
-    protected function fetchData(
-        ?string $path = null,
-        ?string $subpath = null,
-        array $params = [],
-        $page = 0
-    ): HttpResponse {
+    protected function fetchData(?string $path = null, ?string $subpath = null, array $params = [], $page = 0): Response
+    {
         $params = array_merge(
             $params,
             $this->queryCredentials
@@ -272,6 +266,6 @@ class OmekaSReader extends AbstractPaginatedReader
             // Manage exception for api-context.
             . (strlen((string) $path) && $path !== '-context' ? '/' . $path : $path)
             . (strlen((string) $subpath) ? '/' . $subpath : '');
-        return $this->bulkFile->fetchUrl($url, $params);
+        return $this->fetchUrl($url, $params);
     }
 }

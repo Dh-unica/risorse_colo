@@ -3,17 +3,14 @@
 namespace BulkImport\Mvc\Controller\Plugin;
 
 use BulkImport\Processor\AbstractProcessor;
-use Common\Stdlib\EasyMeta;
 use Laminas\Mvc\Controller\Plugin\AbstractPlugin;
 
 class UpdateResourceProperties extends AbstractPlugin
 {
-    use BulkResourceTrait;
-
     /**
-     * @var \Common\Stdlib\EasyMeta
+     * @var \BulkImport\Mvc\Controller\Plugin\Bulk
      */
-    protected $easyMeta;
+    protected $bulk;
 
     /**
      * @var array
@@ -35,10 +32,9 @@ class UpdateResourceProperties extends AbstractPlugin
      */
     protected $result;
 
-    public function __construct(
-        EasyMeta $easyMeta,
-    ) {
-        $this->easyMeta = $easyMeta;
+    public function __construct(Bulk $bulk)
+    {
+        $this->bulk = $bulk;
     }
 
     /**
@@ -52,7 +48,7 @@ class UpdateResourceProperties extends AbstractPlugin
 
         $this->resource = is_null($resource) || is_array($resource)
             ? $resource
-            : $this->resourceJson($resource);
+            : $this->bulk->resourceJson($resource);
 
         $this->values = $values;
 
@@ -99,7 +95,7 @@ class UpdateResourceProperties extends AbstractPlugin
             return $this;
         }
 
-        $properties = $this->easyMeta->propertyIds();
+        $properties = $this->bulk->getPropertyIds();
 
         $resourceProperties = array_intersect_key($this->resource, $properties);
 
@@ -130,7 +126,7 @@ class UpdateResourceProperties extends AbstractPlugin
         // Deduplicate properties.
         $newProperties = array_intersect_key($this->result, $properties);
         foreach ($newProperties as $term => &$vals) {
-            $newVals = $this->normalizePropertyValues($term, $vals);
+            $newVals = $this->bulk->normalizePropertyValues($term, $vals);
             // array_unique() does not work on array, so serialize them first.
             $vals = count($newVals) <= 1
                 ? $newVals
