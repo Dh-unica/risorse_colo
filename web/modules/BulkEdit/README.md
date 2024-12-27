@@ -25,8 +25,18 @@ Current processes are:
 - Convert a value to another data type
 - Update or remove the owner
 - Update value suggest labels
+- apply visibility for values
+- fill label for Value Suggest values
+- remove specified values
+- remove specified media
+- add or remove a thumbnail
+- update order of media
+- explode item into multiple items by media
+- explode pdf into multiple images (mainly for quick display via iiif)
 - Update the media html via item or media
+- update media source
 - Update the media type (mime-type) of a media
+- update media visibility
 
 Furthermore, values are automatically trimmed and deduplicated when a resource
 is saved.
@@ -35,13 +45,28 @@ is saved.
 Installation
 ------------
 
-Uncompress files and rename plugin folder `BulkEdit`.
+### Module
 
-**Important**: If you use the module [Numeric Data Types], you should apply this
-[patch] or use this [version].
+See general end user documentation for [installing a module].
 
-See general end user documentation for [Installing a module] and follow the
-config instructions.
+This module requires the module [Common], that should be installed first.
+
+* From the zip
+
+Download the last release [BulkEdit.zip] from the list of releases, and
+uncompress it in the `modules` directory.
+
+* From the source and for development
+
+If the module was installed from the source, rename the name of the folder of
+the module to `BulkEdit`.
+
+Then install it like any other Omeka module and follow the config instructions.
+
+### Libraries
+
+If you want to explode a pdf, you need either the command `pdftoppm` (poppler)
+(recommended) or `gs` (ghostscript).
 
 
 Usage
@@ -102,9 +127,14 @@ regex), then select the properties to update.
 
 The mode "html" means that the original string will be checked as raw string and
 as html encoded string too. For example, string `café` will be checked with
-`café` and `caf&eacute;`). Be careful when simple characters are mixed with
+`café` and `caf&eacute;`). Be careful when simple characters are mixed with
 entities, it may be difficult to replace all strings. The replacement string is
 used unchanged, so it is recommended to use entities for it too.
+
+For regex, use standard patterns. Examples:
+- Convert spaces into "-" for identifiers: pattern = `~\s+~`, replacement = `-`.
+- Convert `D:20220908101423` into a normalized date: pattern = `~^D:(\d{4})(\d{2})(\d{2})~`,
+  replacement = `$1-$2-$3`.
 
 #### Remove the literal value of a property
 
@@ -121,6 +151,14 @@ Fill fields "Prepend" and/or "Append" and select the properties to update.
 Select the properties to set or remove language.
 Note: all values of the selected properties are updated, so be aware of existing
 languages when they are multiple.
+
+### Remove specified media
+
+You can remove medias of items by media-types or extensions.
+
+### Add or remove a thumbnail
+
+Add or remove a thumbnail from resources, with or without existing thumbnail.
 
 ### Order values
 
@@ -176,16 +214,32 @@ Simply set the user to use or set "Remove user" in the select.
 Select the source datatype and the new datatype. Only some datatype are managed
 currently .
 
+### Explode pdf into images, mainly for iiif
+
+To explode a pdf, you need either the command `pdftoppm` (poppler) (recommended)
+or `gs` (ghostscript).
+
 ### Update media html from item or media
 
 Select the items or medias and update media html, then update it like an item
 value.
+
+### Update media source
+
+Update or clear the media source, for example remove the directory path for
+files imported with the full path. The source may be processed via regex or a
+string may be prepended or appended too. The settings are the same than the ones
+used to replace values above.
 
 ### Update media types (mime-types)
 
 Select the items or medias and set the existing and the new media type. They
 should be standard ones and usually the more precise possible, like `application/tei+xml`
 instead of `application/xml`.
+
+### Update media visibility
+
+Update media visibility according to some metadata.
 
 
 TODO
@@ -243,7 +297,7 @@ of the CeCILL license and that you accept its terms.
 Copyright
 ---------
 
-* Copyright Daniel Berthereau, 2018-2022 (see [Daniel-KM])
+* Copyright Daniel Berthereau, 2018-2024 (see [Daniel-KM])
 
 First developed for the [Archives Henri Poincaré] of [Université de Lorraine],
 then improved for various projects.
@@ -251,11 +305,9 @@ then improved for various projects.
 
 [Bulk Edit]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkEdit
 [Omeka S]: https://omeka.org/s
-[Installing a module]: https://omeka.org/s/docs/user-manual/modules/#installing-modules
-[Numeric Data Types]: https://github.com/Omeka-S-modules/NumericDataTypes
-[patch]: https://github.com/omeka-s-modules/NumericDataTypes/pull/29
-[version]: https://github.com/Daniel-KM/Omeka-S-module-NumericDataTypes
+[installing a module]: https://omeka.org/s/docs/user-manual/modules/#installing-modules
 [Advanced Search]: https://gitlab.com/Daniel-KM/Omeka-S-module-AdvancedSearch
+[Common]: https://gitlab.com/Daniel-KM/Omeka-S-module-Common
 [omeka/omeka-s#1258]: https://github.com/omeka/omeka-s/issues/1258
 [Reference]: https://gitlab.com/Daniel-KM/Omeka-S-module-Reference
 [module issues]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkEdit/-/issues

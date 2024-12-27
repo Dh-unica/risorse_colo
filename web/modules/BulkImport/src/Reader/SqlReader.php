@@ -6,7 +6,7 @@ use ArrayIterator;
 use BulkImport\Form\Reader\SqlReaderConfigForm;
 use BulkImport\Form\Reader\SqlReaderParamsForm;
 use Laminas\Db\Adapter\Adapter as DbAdapter;
-use Log\Stdlib\PsrMessage;
+use Common\Stdlib\PsrMessage;
 
 class SqlReader extends AbstractPaginatedReader
 {
@@ -75,7 +75,7 @@ class SqlReader extends AbstractPaginatedReader
      * @param DbAdapter $dbAdapter
      * @return self
      */
-    public function setDbAdapter(DbAdapter $dbAdapter): \BulkImport\Reader\Reader
+    public function setDbAdapter(DbAdapter $dbAdapter): self
     {
         $this->dbAdapter = $dbAdapter;
         return $this;
@@ -92,7 +92,7 @@ class SqlReader extends AbstractPaginatedReader
         return $this->dbAdapter;
     }
 
-    public function setDbConfig(array $dbConfig): \BulkImport\Reader\Reader
+    public function setDbConfig(array $dbConfig): self
     {
         $this->dbConfig = $dbConfig;
         $this->dbConfig['driver'] = $this->dbConfig['driver'] ?? 'Pdo_Mysql';
@@ -104,7 +104,7 @@ class SqlReader extends AbstractPaginatedReader
         return $this->dbConfig;
     }
 
-    public function setPrefix(string $prefix): \BulkImport\Reader\Reader
+    public function setPrefix(string $prefix): self
     {
         $this->prefix = $prefix;
         return $this;
@@ -125,17 +125,15 @@ class SqlReader extends AbstractPaginatedReader
             $results = $stmt->execute();
         } catch (\Laminas\Db\Adapter\Exception\ExceptionInterface $e) {
             $this->lastErrorMessage = $e->getMessage();
-            $this->getServiceLocator()->get('Omeka\Logger')->err($this->lastErrorMessage);
-            return false;
+            return parent::isValid();
         }
 
         if (empty($results->current())) {
             $this->lastErrorMesage = 'The database seems empty: there is no data in a core table.'; // @translate
-            $this->getServiceLocator()->get('Omeka\Logger')->err($this->lastErrorMessage);
-            return false;
+            return parent::isValid();
         }
 
-        return true;
+        return parent::isValid();
     }
 
     /**
@@ -158,7 +156,7 @@ class SqlReader extends AbstractPaginatedReader
 
         if (empty($mainDbConfig['host']) || $mainDbConfig['host'] !== $host) {
             $this->lastErrorMesage = 'The database should be on the same server to allow direct access by the main database user.'; // @translate
-            $this->getServiceLocator()->get('Omeka\Logger')->err($this->lastErrorMessage);
+            $this->logger->err($this->lastErrorMessage);
             return false;
         }
 
@@ -184,7 +182,7 @@ class SqlReader extends AbstractPaginatedReader
             $results = $stmt->execute();
             if (empty($results->current())) {
                 $this->lastErrorMesage = 'The database seems empty: there is no data in a core table. You may add Grant Select to this database for the main database user.'; // @translate
-                $this->getServiceLocator()->get('Omeka\Logger')->err($this->lastErrorMessage);
+                $this->logger->err($this->lastErrorMessage);
                 return false;
             }
         } catch (\Exception $e) {
@@ -205,7 +203,7 @@ SQL;
                 $result = $connection->executeQuery($sql)->fetchAll();
             } catch (\Exception $e) {
                 $this->lastErrorMesage = 'Unable to check grants of a user.'; // @translate
-                $this->getServiceLocator()->get('Omeka\Logger')->err($this->lastErrorMessage);
+                $this->logger->err($this->lastErrorMessage);
                 return false;
             }
         }
@@ -255,7 +253,11 @@ SQL;
             return null;
         }
 
-        $filepath = @tempnam(sys_get_temp_dir(), 'omk_bki_');
+        // TODO Use omeka temp directory (but check if mysql has access to it).
+        // $tempPath = $this->getServiceLocator()->get('Config')['temp_dir'] ?: sys_get_temp_dir();
+        $tempPath = sys_get_temp_dir();
+
+        $filepath = @tempnam($tempPath, 'omk_bki_');
         unlink($filepath);
         if (file_exists($filepath . '.csv')) {
             $filepath .= substr(uniqid(), 0, 8);
@@ -326,7 +328,7 @@ SQL;
                 'Unable to read all values for object type "{table}": {exception}', // @translate
                 ['table' => $this->objectType, 'exception' => $e]
             );
-            $this->getServiceLocator()->get('Omeka\Logger')->err(
+            $this->logger->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -357,7 +359,7 @@ SQL;
         return $this->getParam('database');
     }
 
-    protected function initArgs(): \BulkImport\Reader\Reader
+    protected function initArgs(): self
     {
         $this->dbConfig = [];
         $this->dbConfig['database'] = $this->getParam('database', '');
@@ -393,7 +395,7 @@ SQL;
                 'Unable to read data for object type "{table}", page: {exception}', // @translate
                 ['table' => $this->objectType, 'exception' => $e]
             );
-            $this->getServiceLocator()->get('Omeka\Logger')->err(
+            $this->logger->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -407,7 +409,7 @@ SQL;
                 'Unable to fetch data for the page {page}.', // @translate
                 ['page' => $this->currentPage]
             );
-            $this->getServiceLocator()->get('Omeka\Logger')->err(
+            $this->logger->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -437,7 +439,7 @@ SQL;
                 'Unable to read data for object type "{table}": {exception}', // @translate
                 ['table' => $this->objectType, 'exception' => $e]
             );
-            $this->getServiceLocator()->get('Omeka\Logger')->err(
+            $this->logger->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -449,7 +451,7 @@ SQL;
                 'Unable to read data for object type "{table}".', // @translate
                 ['table' => $this->objectType]
             );
-            $this->getServiceLocator()->get('Omeka\Logger')->err(
+            $this->logger->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );

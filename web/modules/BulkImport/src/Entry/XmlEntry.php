@@ -3,32 +3,137 @@
 namespace BulkImport\Entry;
 
 use SimpleXMLElement;
+use XMLReaderNode;
 
 class XmlEntry extends BaseEntry
 {
+    protected $xmlOptions = LIBXML_BIGLINES
+        | LIBXML_COMPACT
+        | LIBXML_NOBLANKS
+        // | LIBXML_NOCDATA
+        | LIBXML_NOENT
+        | LIBXML_PARSEHUGE
+        | LIBXML_HTML_NOIMPLIED
+        | LIBXML_HTML_NODEFDTD
+        | LIBXML_NOERROR
+        | LIBXML_NOWARNING
+        // This option is not working on old versions of php.
+        | LIBXML_NOXMLDECL
+        | LIBXML_NSCLEAN
+    ;
+
     protected function init(): void
     {
-        /** @var \XMLReaderNode $data */
-        $simpleData = $this->data->getSimpleXMLElement();
-        $namespaces = [null] + $simpleData->getNamespaces(true);
-
-        // Fix issue with cdata (no: it will escape html tags).
-        $simpleData = new SimpleXMLElement($simpleData->asXML(), LIBXML_BIGLINES | LIBXML_COMPACT | LIBXML_NOBLANKS
-                | /* LIBXML_NOCDATA | */ LIBXML_NOENT | LIBXML_PARSEHUGE);
-
-        $array = $this->attributes($simpleData);
-
-        if ($this->options['transformSource']) {
-            $this->initWithTransformSource($simpleData);
+        if ($this->data instanceof XMLReaderNode) {
+            $simpleXml = $this->data->getSimpleXMLElement();
+            // Fix issue with cdata (no: it will escape html tags).
+            // $simpleXml = new SimpleXMLElement($simpleXml->asXML(), $this->xmlOptions);
+            $simpleXml = new \BulkImport\Entry\SimpleXMLElementNamespaced($simpleXml->asXML(), $this->xmlOptions);
+        } elseif (!$this->data instanceof SimpleXMLElement) {
+            $this->data = [];
             return;
         }
 
+        // To check xml in entry:
+        // echo $simpleXml->asXML();
+        // $this->logger->debug($simpleXml->asXML());
+        /*
+        $dom = new DOMDocument('1.0');
+        $dom->preserveWhiteSpace = false;
+        $dom->formatOutput = true;
+        $dom->loadXML($simpleXml->asXML());
+        echo $dom->saveXML();
+        $this->logger->debug($dom->saveXML());
+        */
+
+        // Remove wrapper to keep mapping simple with xpath adapted to source.
+
+        // There should be only one resource by entry, else use a xsl to
+        // separate them earlier.
+
+        // The resource may be a resource itself or may be wrapped, for example
+        // with child `ead` or `unimarc`. When wrapped, the attribute `wrapper="1"`
+        // should be set.
+
+        // For example, here, the real resource is `record` and `resource` is
+        // the wrapper:
+        // `<resources><resource wrapper="1"><record>...</record></resource></resources>`.
+        // So the source xml (transformed by xsl) is: `/resources/resource/record`
+        // In the iterated entry, the xml is: `/resource/record`
+        // And the wrapper `resource` is removed to get only `record` (or any
+        // other first child element, like `unimarc` or `ead`). This mechanism
+        // is similar to oai-pmh wrapping.
+
+        // To simplify process, the wrapper can be the record itself.
+        // It is useful when the source is already like an omeka json-ld
+        // resource, or when the source is transformed by an xsl to be like an
+        // omeka json-ld element, because it avoids a possible double `/resource/resource`
+        // or any other useless element.
+
+        // And when the content matches the json-ld representation, a mapping is
+        // useless.
+
+        // Remove the wrapper if any.
+        $isWrapper = $simpleXml->xpath('/resource/@wrapper');
+        $isWrapper = $isWrapper ? (bool) $isWrapper[0] : false;
+        if ($isWrapper) {
+            $unwrappedData = null;
+            foreach ($simpleXml->xpath('/resource/child::*[1]') as $node) {
+                // Avoid warning on missing namespaces. But here, it doesn't matter.
+                // TODO Log warning on missing namespaces instead of output.
+                $unwrappedData = @new SimpleXMLElement($node->asXML()) ?: null;
+                break;
+            }
+            $this->xml = $unwrappedData;
+        } else {
+            $this->xml = $simpleXml;
+        }
+
+        $this->data = [];
+    }
+
+    public function isEmpty(): bool
+    {
+        return $this->xml === null;
+    }
+
+    public function getArrayCopy(): array
+    {
+        if ($this->xml === null || $this->data !== []) {
+            return $this->data;
+        }
+        if (!$this->xml instanceof \BulkImport\Entry\SimpleXMLElementNamespaced) {
+            $this->xml = new \BulkImport\Entry\SimpleXMLElementNamespaced($this->xml->asXML());
+        }
+        $this->data = $this->xml
+            ->setWithPrefix(true)
+            ->toArray(true);
+        return $this->data;
+    }
+
+    /**
+     * When the xml is an Omeka resource with integrated vocabularies, there is
+     * no need to convert it.
+     *
+     * @todo Important: For xml entry, convert this simple internal mapping into a hidden mapping to use with metaMapper.
+     */
+    public function extractWithoutMapping(): array
+    {
+        if ($this->xml === null) {
+            return [];
+        }
+
+        $namespaces = [null] + $this->xml->getNamespaces(true);
+
+        $array = $this->attributes($this->xml);
+
         foreach ($namespaces as $prefix => $namespace) {
             $nsElements = $namespace
-                ? $simpleData->children($namespace)
-                : $simpleData->children();
+                ? $this->xml->children($namespace)
+                : $this->xml->children();
             foreach ($nsElements as $element) {
                 $term = ($prefix ? $prefix . ':' : '') . $element->getName();
+                $singleValue = false;
                 switch ($term) {
                     case 'o:item_set':
                         $value = $this->initItemSet($element);
@@ -36,18 +141,37 @@ class XmlEntry extends BaseEntry
                     case 'o:media':
                         $value = $this->initMedia($element);
                         break;
+                    case 'o:class':
+                        $term = 'o:resource_class';
+                        // no break.
+                    case 'o:resource_class':
+                        $singleValue = true;
+                        $value = $this->innerXml($element);
+                        break;
+                    case 'o:template':
+                        $term = 'o:resource_template';
+                        // no break.
+                    case 'o:resource_template':
+                        $singleValue = true;
+                        $value = $this->innerXml($element);
+                        break;
                     // Properties.
                     default:
                         $value = $this->initPropertyValue($element, $prefix);
                         break;
                 }
                 if ($value) {
-                    $array[$term][] = $value;
+                    if ($singleValue) {
+                        $array[$term] = $value;
+                    } else {
+                        $array[$term][] = $value;
+                    }
                 }
             }
         }
 
         $this->data = $array;
+        return $this->data;
     }
 
     protected function initItemSet(SimpleXMLElement $element): ?array
@@ -106,8 +230,6 @@ class XmlEntry extends BaseEntry
                 $term = ($prefix ? $prefix . ':' : '') . $element->getName();
                 switch ($term) {
                     case 'o:media':
-                        // No recursive here: this is already a media, so this
-                        // is the base media.
                         $value = $this->initMediaBase($element);
                         if ($value) {
                             unset(
@@ -140,86 +262,102 @@ class XmlEntry extends BaseEntry
 
     protected function initMediaBase(SimpleXMLElement $element): ?array
     {
-        $resource = $this->attributes($element);
+        $media = $this->attributes($element);
 
-        $value = $this->innerXml($element);
-        if (!strlen($value)) {
-            return empty($resource['o:ingester'])
+        $inner = $this->innerXml($element);
+        if (!strlen($inner)) {
+            return empty($media['o:ingester'])
                 ? null
-                : $resource;
+                : $media;
         }
 
-        $ingester = $resource['o:ingester'] ?? 'url';
-        switch ($ingester) {
-            default:
-            case 'url':
-                $resource += [
-                    'resource_name' => 'media',
-                    'o:ingester' => 'url',
-                    'ingest_url' => $value,
-                    'o:source' => $value,
-                ];
-                break;
+        $media['resource_name'] = 'media';
 
-            case 'file':
-                if ($this->isUrl($value)) {
-                    $resource += [
-                        'resource_name' => 'media',
-                        'o:ingester' => 'url',
-                        'ingest_url' => $value,
-                        'o:source' => $value,
-                    ];
-                } else {
-                    $resource += [
-                        'resource_name' => 'media',
-                        'o:ingester' => 'sideload',
-                        'ingest_filename' => $value,
-                        'o:source' => $value,
-                    ];
-                }
-                break;
+        /**
+         * @see \BulkImport\Processor\ResourceProcessor::prepareMediaData()
+         * @see \BulkImport\Processor\ResourceProcessor::prepareMediaDataFinalize()
+         */
+        $ingester = $media['o:ingester'] ?? 'file';
 
-            case 'directory':
-                $resource += [
-                    'resource_name' => 'media',
-                    'o:ingester' => 'sideload_dir',
-                    'ingest_directory' => $value,
-                    'o:source' => $value,
-                ];
-                break;
+        // Except html that is rare, it is a path or url, so without <.
+        if (mb_strpos($inner, '<')) {
+            $value = $inner;
+            switch ($ingester) {
+                default:
+                    return null;
+                case 'tile':
+                    // Deprecated: "tile" is only a renderer, no more an ingester
+                    // since ImageServer version 3.6.13. All images are
+                    // automatically tiled, so "tile" is a format similar to large/medium/square,
+                    // but different.
+                case 'file':
+                case 'url':
+                case 'sideload':
+                    // A file may be a url for end-user simplicity.
+                    $media['o:source'] = empty($media['o:source']) ? $value : $media['o:source'];
+                    if ($this->isUrl($value)) {
+                        $media['o:ingester'] = 'url';
+                        $media['ingest_url'] = $value;
+                        unset($media['ingest_filename']);
+                        unset($media['ingest_directory']);
+                    }  else {
+                        // TODO Manage local file bulk upload (but normally checked later)
+                        $media['o:ingester'] = 'sideload';
+                        $media['ingest_filename'] = $value;
+                        unset($media['ingest_url']);
+                        unset($media['ingest_directory']);
+                    }
+                    break;
 
-            case 'html':
-                $resource += [
-                    'resource_name' => 'media',
-                    'o:ingester' => 'html',
-                    'html' => $value,
-                    'o:source' => null,
-                ];
-                break;
+                case 'directory':
+                case 'sideload_dir':
+                    $media['o:ingester'] = 'sideload_dir';
+                    $media['ingest_directory'] = $value;
+                    $media['o:source'] = empty($media['o:source']) ? $value : $media['o:source'];
+                    unset($media['ingest_filename']);
+                    unset($media['ingest_url']);
+                    break;
 
-            case 'iiif':
-                if (!$this->isUrl($value) && !empty($this->options['iiifserver_media_api_url'])) {
-                    $value = $this->options['iiifserver_media_api_url'] . $value;
-                }
-                $resource += [
-                    'resource_name' => 'media',
-                    'o:ingester' => 'iiif',
-                    'ingest_url' => $value,
-                    'o:source' => $value,
-                ];
-                return true;
+                // TODO Manager html value data in media.
+                case 'html':
+                    $media['o:ingester'] = 'html';
+                    $media['html'] = $value;
+                    $media['o:source'] ??= null;
+                    unset($media['ingest_url']);
+                    unset($media['ingest_filename']);
+                    unset($media['ingest_directory']);
+                    break;
 
-            case 'tile':
-                $resource += [
-                    'resource_name' => 'media',
-                    'o:ingester' => 'tile',
-                    'ingest_url' => $value,
-                    'o:source' => $value,
-                ];
-                break;
+                case 'iiif':
+                    if (!$this->isUrl($value) && !empty($this->options['iiifserver_media_api_url'])) {
+                        $value = $this->options['iiifserver_media_api_url'] . $value;
+                    }
+                    $media['o:ingester'] = 'iiif';
+                    $media['ingest_url'] = $value;
+                    unset($media['ingest_filename']);
+                    unset($media['ingest_directory']);
+                    break;
+            }
         }
 
-        return $resource;
+        // Get properties if any.
+        $mainElement = $element;
+        /** @var \XMLReaderNode $data */
+        $namespaces = [null] + $mainElement->getNamespaces(true);
+        foreach ($namespaces as $prefix => $namespace) {
+            $nsElements = $namespace
+                ? $mainElement->children($namespace)
+                : $mainElement->children();
+            foreach ($nsElements as $element) {
+                $term = ($prefix ? $prefix . ':' : '') . $element->getName();
+                $value = $this->initPropertyValue($element, $prefix);
+                if ($value) {
+                    $media[$term][] = $value;
+                }
+            }
+        }
+
+        return $media;
     }
 
     protected function initPropertyValue(SimpleXMLElement $element): ?array
@@ -257,17 +395,17 @@ class XmlEntry extends BaseEntry
                 throw new \Exception('Unable to import a linked resource via xml currently.'); // @translate
                 break;
 
-                // Module Custom Vocab.
+            // Module Custom Vocab.
 
             case substr($type, 0, 12) === 'customvocab:':
-                // TODO Manage items by type "customvocab.
+                // TODO Manage items and uri by type for customvocab.
                 $value = [
                     'type' => $type,
                     '@value' => $string,
                 ];
                 break;
 
-                // Module Value Suggest (may be valuesuggest or valuesuggestall).
+            // Module Value Suggest (may be valuesuggest or valuesuggestall).
 
             case substr($type, 0, 12) === 'valuesuggest':
                 $value = [
@@ -277,7 +415,8 @@ class XmlEntry extends BaseEntry
                 ];
                 break;
 
-                // Module Data type Rdf.
+            // Module Data type Rdf.
+
             case 'html':
             case 'rdf:HTML':
             case 'http://www.w3.org/1999/02/22-rdf-syntax-ns#HTML':
@@ -306,19 +445,35 @@ class XmlEntry extends BaseEntry
                 ];
                 break;
 
-                // Module DataTypeGeometry.
+            // Module DataTypeGeometry.
 
+            case 'geography':
+            case 'geometry':
+            case 'geography:coordinates':
+            case 'geometry:coordinates':
+            case 'geometry:position':
+            case 'http://www.opengis.net/ont/geosparql#wktLiteral':
+            case 'geometry:geography:coordinates':
+            case 'geometry:geometry:coordinates':
+            case 'geometry:geometry:position':
             case 'geometry:geography':
             case 'geometry:geometry':
-            case 'http://www.opengis.net/ont/geosparql#wktLiteral':
+                $geotypes = [
+                    'geometry:geometry' => 'geometry',
+                    'geometry:geography' => 'geography',
+                    'geometry:geometry:position' => 'geometry:position',
+                    'geometry:geometry:coordinates' => 'geometry:coordinates',
+                    'geometry:geography:coordinates' => 'geography:coordinates',
+                    'http://www.opengis.net/ont/geosparql#wktLiteral' => 'geography',
+                ];
                 $value = [
-                    'type' => $type === 'http://www.opengis.net/ont/geosparql#wktLiteral' ? 'geometry:geometry' : $type,
+                    'type' => $geotypes[$type] ?? $type,
                     '@value' => $string,
                     '@language' => null,
                 ];
                 break;
 
-                // Module Numeric data types.
+            // Module Numeric data types.
 
             case 'numeric:integer':
             case 'xsd:integer':
@@ -355,7 +510,7 @@ class XmlEntry extends BaseEntry
                 ];
                 break;
 
-                // Module RdfDataType (deprecated).
+            // Module RdfDataType (deprecated).
 
             case 'xsd:date':
             case 'xsd:dateTime':
@@ -382,7 +537,7 @@ class XmlEntry extends BaseEntry
                 }
                 break;
 
-                // TODO Need conversion to numeric timestamp. See this module.
+            // TODO Need conversion to numeric timestamp. See this module.
             case 'xsd:decimal':
             case 'xsd:gDay':
             case 'xsd:gMonth':
@@ -395,7 +550,7 @@ class XmlEntry extends BaseEntry
                 ];
                 break;
 
-                // Module IdRef (deprecated).
+            // Module IdRef (deprecated).
             case 'idref':
                 $value = [
                     'type' => 'valuesuggest:idref:person',
@@ -414,47 +569,6 @@ class XmlEntry extends BaseEntry
         return $value;
     }
 
-    public function isEmpty(): bool
-    {
-        // Unlike Entry, data are filtered during array conversion.
-        return !count($this->data);
-    }
-
-    /**
-     * @see \BulkImport\Entry\JsonEntry::init()
-     */
-    protected function initWithTransformSource(SimpleXMLElement $data): void
-    {
-        /** @var \BulkImport\Mvc\Controller\Plugin\TransformSource $transformSource */
-        $transformSource = $this->options['transformSource'];
-
-        // Remove wrapper to keep mapping simple with xpath adapted to source.
-        $unwrappedData = null;
-        foreach ($data->xpath('/resource/child::*[1]') as $node) {
-            $unwrappedData = new \SimpleXMLElement($node->asXML());
-            break;
-        }
-        if (!$unwrappedData) {
-            $this->data = [];
-            return;
-        }
-
-        // The real resource type is set via config or via processor.
-        $resource = [];
-        $resource = $transformSource->convertMappingSectionXml('default', $resource, $unwrappedData, true);
-        $resource = $transformSource->convertMappingSectionXml('mapping', $resource, $unwrappedData);
-
-        // Filter duplicated and null values.
-        foreach ($resource as &$datas) {
-            $datas = array_values(array_unique(array_filter(array_map('strval', $datas), 'strlen')));
-        }
-        unset($datas);
-
-        // Cf. JsonEntry to manage files (check urls).
-
-        $this->data = $resource;
-    }
-
     /**
      * Get the inner string from an xml, in particular for cdata.
      *
@@ -470,17 +584,41 @@ class XmlEntry extends BaseEntry
 
         /*
         $value = '';
-        foreach (dom_import_simplexml($element)->childNodes as $child) {
-            $value .= $child->ownerDocument->saveXML($child);
+        $doc = dom_import_simplexml($element);
+        $doc->preserveWhiteSpace = false;
+        $doc->formatOutput = true;
+        foreach ($doc->childNodes as $child) {
+            $value .= $child->ownerDocument->saveXML($child, $this->xmlOptions) . PHP_EOL;
         }
         $value = trim($value);
-        */
+         */
+
         $value = trim((string) $element->asXml());
         $pos = mb_strpos($value, '>');
         $value = trim(mb_substr($value, $pos + 1, mb_strrpos($value, '</') - $pos - 1));
-        return mb_substr($value, 0, 9) === '<![CDATA[' && mb_substr($value, -3) === ']]>'
-            ? mb_substr($value, 9, -3)
-            : $value;
+
+        if (mb_substr($value, 0, 9) === '<![CDATA[' && mb_substr($value, -3) === ']]>') {
+            $value = trim(mb_substr($value, 9, -3));
+        }
+
+        if (mb_substr($value, 0, 1) !== '<' || mb_substr($value, -1) !== '>') {
+            return $value;
+        }
+
+        $doc = new \DomDocument();
+        $doc->preserveWhiteSpace = false;
+        $doc->formatOutput = true;
+        $result = $doc->loadXML($value, $this->xmlOptions);
+        if (!$result) {
+            $result = $doc->loadHTML($value, $this->xmlOptions);
+            return $result
+                ? $doc->saveHTML()
+                : $value;
+        }
+        $output = $doc->saveXML(null, $this->xmlOptions);
+        return mb_substr($output, 0, 2) === '<?'
+            ? trim(mb_substr($output, mb_strpos($output, '?>') + 2))
+            : $output;
     }
 
     /**
@@ -515,7 +653,7 @@ class XmlEntry extends BaseEntry
      * @param string $string
      * @return bool
      */
-    protected function isUrl($string)
+    protected function isUrl($string): bool
     {
         return strpos($string, 'https:') === 0
             || strpos($string, 'http:') === 0

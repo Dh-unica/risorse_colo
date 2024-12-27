@@ -5,12 +5,10 @@ namespace BulkImport\Entry;
 /**
  * Like Entry, but allows to manage multi-valued cells.
  *
- * @todo Make Entry and SpreadsheetEntry output only Omeka array data, like XmlEntry (so move some processor process into reader).
+ * @todo Allow to use multiple times the same column (require to update mapping output of the form).
  */
 class SpreadsheetEntry extends BaseEntry
 {
-    const SIMPLE_DATA = true;
-
     protected function init(): void
     {
         parent::init();
@@ -42,9 +40,10 @@ class SpreadsheetEntry extends BaseEntry
             $this->data[$key] = array_merge(...$vs);
         }
 
-        // Filter duplicated and null values.
+        // Filter duplicated and null values early.
         foreach ($this->data as &$datas) {
             $datas = array_unique(array_filter(array_map('strval', $datas), 'strlen'));
         }
+        unset($datas);
     }
 }

@@ -16,33 +16,49 @@ class ItemSetProcessor extends ResourceProcessor
 
     protected $paramsFormClass = ItemSetProcessorParamsForm::class;
 
-    protected function handleFormSpecific(ArrayObject $args, array $values): \BulkImport\Processor\Processor
+    /**
+     * @see \Omeka\Api\Representation\ItemSetRepresentation
+     *
+     * @var array
+     */
+    protected $fieldTypes = [
+        // Common metadata.
+        'resource_name' => 'string',
+        // "o:id" may be an identifier.
+        'o:id' => 'string',
+        'o:created' => 'datetime',
+        'o:modified' => 'datetime',
+        'o:is_public' => 'boolean',
+        'o:owner' => 'entity',
+        // Alias of "o:owner" here.
+        'o:email' => 'entity',
+        // Generic.
+        'o:resource_template' => 'entity',
+        'o:resource_class' => 'entity',
+        'o:thumbnail' => 'entity',
+        // A common, but special and complex key, so managed in meta config too.
+        'property' => 'arrays',
+        // Item set.
+        'o:is_open' => 'boolean',
+        'o:items' => 'entities',
+    ];
+
+    protected function handleFormSpecific(ArrayObject $args, array $values): self
     {
-        $this->handleFormItemSet($args, $values);
-        return $this;
+        return $this
+            ->handleFormItemSet($args, $values);
     }
 
-    protected function baseSpecific(ArrayObject $resource): \BulkImport\Processor\Processor
+    protected function prepareBaseEntitySpecific(ArrayObject $resource): self
     {
-        $this->baseItemSet($resource);
-        return $this;
+        return $this
+            ->prepareBaseResourceCommon($resource)
+            ->prepareBaseItemSet($resource);
     }
 
-    protected function fillSpecific(ArrayObject $resource, $target, array $values): bool
+    protected function fillResourceSpecific(ArrayObject $resource, array $data, ?string $mainResourceName = null): self
     {
-        switch ($target['target']) {
-            case $this->fillItemSet($resource, $target, $values):
-                return true;
-            default:
-                return false;
-        }
-        return false;
-    }
-
-    protected function checkEntity(ArrayObject $resource): bool
-    {
-        parent::checkEntity($resource);
-        $this->checkItemSet($resource);
-        return !$resource['messageStore']->hasErrors();
+        return $this
+            ->fillItemSet($resource, $data);
     }
 }

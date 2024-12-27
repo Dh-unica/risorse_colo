@@ -2,16 +2,18 @@
 
 namespace BulkImport\Reader;
 
-use Box\Spout\Common\Type;
 use BulkImport\Form\Reader\CsvReaderConfigForm;
 use BulkImport\Form\Reader\CsvReaderParamsForm;
-use Log\Stdlib\PsrMessage;
+use Common\Stdlib\PsrMessage;
+use OpenSpout\Common\Type;
 use SplFileObject;
 
 /**
- * Box Spout Spreadshet reader doesn't support escape for csv (even if it
+ * OpenSpout Spreadshet reader doesn't support escape for csv (even if it
  * manages end of line and encoding). So the basic file handler is used for csv.
  * The format tsv uses the Spout reader, because there is no escape.
+ *
+ * @todo Check if OpenSpout supports escape for csv.
  */
 class CsvReader extends AbstractSpreadsheetFileReader
 {
@@ -90,7 +92,7 @@ class CsvReader extends AbstractSpreadsheetFileReader
         $this->next();
     }
 
-    protected function reset(): \BulkImport\Reader\Reader
+    protected function reset(): self
     {
         parent::reset();
         $this->delimiter = self::DEFAULT_DELIMITER;
@@ -99,7 +101,7 @@ class CsvReader extends AbstractSpreadsheetFileReader
         return $this;
     }
 
-    protected function prepareIterator(): \BulkImport\Reader\Reader
+    protected function prepareIterator(): self
     {
         parent::prepareIterator();
         // Skip headers, already stored.
@@ -107,9 +109,18 @@ class CsvReader extends AbstractSpreadsheetFileReader
         return $this;
     }
 
-    protected function initializeReader(): \BulkImport\Reader\Reader
+    protected function initializeReader(): self
     {
         $filepath = $this->getParam('filename');
+
+        if (!$filepath) {
+            // The error occurs when the form is reloaded.
+            $this->lastErrorMessage = new PsrMessage(
+                'The filepath is missing. Restart import if you reload the form twice.' // @translate
+            );
+            throw new \Omeka\Service\Exception\RuntimeException((string) $this->lastErrorMessage);
+        }
+
         $this->iterator = new SplFileObject($filepath);
 
         $this->delimiter = $this->getParam('delimiter', self::DEFAULT_DELIMITER);
@@ -125,46 +136,33 @@ class CsvReader extends AbstractSpreadsheetFileReader
         return $this;
     }
 
-    protected function finalizePrepareIterator(): \BulkImport\Reader\Reader
+    protected function finalizePrepareIterator(): self
     {
         // Warning: it should skip last empty rows, but it is rare for csv.
         $this->totalEntries = iterator_count($this->iterator) - 1;
         return $this;
     }
 
-    protected function prepareAvailableFields(): \BulkImport\Reader\Reader
+    protected function prepareAvailableFields(): self
     {
         $this->iterator->rewind();
         $fields = $this->iterator->current();
         if (!is_array($fields)) {
             $this->lastErrorMessage = 'File has no available fields.'; // @translate
-            throw new \Omeka\Service\Exception\RuntimeException((string) $this->getLastErrorMessage());
+            throw new \Omeka\Service\Exception\RuntimeException((string) $this->lastErrorMessage);
         }
         // The data should be cleaned, since it's not an entry.
-        $this->availableFields = $this->cleanData($fields);
+        $this->availableFields = array_map([$this->bulk, 'trimUnicode'], $fields);
         return $this;
     }
 
-    protected function isValidFilepath($filepath, array $file = []): bool
+    protected function checkFileArray(array $file = []): array
     {
         // On some servers, type for csv is "application/vnd.ms-excel".
         if (!empty($file['type']) && $file['type'] === 'application/vnd.ms-excel') {
             $file['type'] = 'text/csv';
         }
-
-        if (!parent::isValidFilepath($filepath, $file)) {
-            return false;
-        }
-
-        if (!$this->isUtf8($filepath)) {
-            $this->lastErrorMessage = new PsrMessage(
-                'File "{filename}" is not fully utf-8.', // @translate
-                ['filename' => $file['name']]
-            );
-            return false;
-        }
-
-        return true;
+        return $file;
     }
 
     /**

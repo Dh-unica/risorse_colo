@@ -31,9 +31,9 @@ trait ThesaurusTrait
             // New thesaurus.
             'label' => 'Thesaurus',
             // TODO Fix singular/plural for internal thesaurus data.
-            // The source, main name and the source are the same, but in some
-            // cases, one is plural and the other one is singular.
-            'mapping_name' => 'concepts',
+            // The mapping source, main name and the source are the same, but in
+            // some cases, one is plural and the other one is singular.
+            'mapping_source' => 'concepts',
             'main_name' => 'concept',
             // Data from the source.
             'source' => 'concept',
@@ -63,7 +63,7 @@ trait ThesaurusTrait
     protected function prepareThesaurus(): void
     {
         $config = $this->thesaurusConfigs[$this->configThesaurus];
-        $mappingName = $config['mapping_name'];
+        $mappingName = $config['mapping_source'];
         $mainName = $config['main_name'];
 
         $name = $config['label'] ?: sprintf('Thesaurus %s (%s)', $this->resourceLabel, $this->currentDateTimeFormatted); // @translate;
@@ -120,7 +120,10 @@ trait ThesaurusTrait
         $vocabulary = $this->entityManager->getRepository(\Omeka\Entity\Vocabulary::class)->findOneBy(['prefix' => 'skos']);
         $classSkosConceptScheme = $this->entityManager->getRepository(\Omeka\Entity\ResourceClass::class)->findOneBy(['vocabulary' => $vocabulary, 'localName' => 'ConceptScheme']);
         $classSkosCollection = $this->entityManager->getRepository(\Omeka\Entity\ResourceClass::class)->findOneBy(['vocabulary' => $vocabulary, 'localName' => 'Collection']);
-        $templateThesaurusScheme = $this->entityManager->getRepository(\Omeka\Entity\ResourceTemplate::class)->findOneBy(['label' => 'Thesaurus Scheme']);
+        $templateThesaurusSchemeId = (int) $this->getServiceLocator()->get('Omeka\Settings')->get('thesaurus_skos_scheme_template_id');
+        $templateThesaurusScheme = $templateThesaurusSchemeId
+            ? $this->entityManager->getRepository(\Omeka\Entity\ResourceTemplate::class)->find($templateThesaurusSchemeId)
+            : $this->entityManager->getRepository(\Omeka\Entity\ResourceTemplate::class)->findOneBy(['label' => 'Thesaurus Scheme']);
 
         $item = $schemeReal ?? new \Omeka\Entity\Item;
         $item->setOwner($this->owner);
@@ -202,7 +205,7 @@ trait ThesaurusTrait
         $config = $this->thesaurusConfigs[$this->configThesaurus];
 
         $label = $config['label'];
-        $mappingName = $config['mapping_name'];
+        $mappingName = $config['mapping_source'];
         $mainName = $config['main_name'];
 
         if (!isset($this->map[$mappingName])) {
@@ -342,7 +345,7 @@ trait ThesaurusTrait
     protected function fillConceptProcess(array $source): void
     {
         $config = $this->thesaurusConfigs[$this->configThesaurus];
-        $mappingName = $config['mapping_name'];
+        $mappingName = $config['mapping_source'];
         $mainName = $config['main_name'];
 
         $keyId = $config['key_id'];

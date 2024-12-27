@@ -3,28 +3,42 @@
 namespace BulkImport\Processor;
 
 use ArrayObject;
-use BulkImport\Entry\Entry;
 use BulkImport\Interfaces\Configurable;
 use BulkImport\Interfaces\Parametrizable;
 use BulkImport\Stdlib\MessageStore;
 use BulkImport\Traits\ConfigurableTrait;
 use BulkImport\Traits\ParametrizableTrait;
-use BulkImport\Traits\TransformSourceTrait;
 use Laminas\Form\Form;
-use Log\Stdlib\PsrMessage;
+use Common\Stdlib\PsrMessage;
 use Omeka\Api\Exception\ValidationException;
-use Omeka\Api\Representation\AbstractResourceEntityRepresentation;
-use Omeka\Entity\Asset;
+use Omeka\Api\Representation\AbstractEntityRepresentation;
+use Omeka\Api\Request;
 
+/**
+ * Can be used for all derivative of AbstractResourceRepresentation.
+ */
 abstract class AbstractResourceProcessor extends AbstractProcessor implements Configurable, Parametrizable
 {
     use ConfigurableTrait, ParametrizableTrait;
-    use CheckTrait;
-    use FileTrait;
-    use ResourceUpdateTrait;
-    use TransformSourceTrait;
 
     /**
+     * Specific action used for unidentified identifiers..
+     *
+     * @var string
+     */
+    const ACTION_ERROR = 'error';
+
+    /**
+     * Specific action used for sub update, for example the resources for a new
+     * thumbnail.
+     *
+     * @var string
+     */
+    const ACTION_SUB_UPDATE = 'sub_update';
+
+    /**
+     * The resource name to process with this processor.
+     *
      * @var string
      */
     protected $resourceName;
@@ -45,6 +59,40 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
     protected $paramsFormClass;
 
     /**
+     * List of types for keys of the resources, used to simplify mapping.
+     *
+     * Keys are the fields of the resources and values are the variable types.
+     * Managed types are: "skip", "boolean", "integer", "string", "datetime",
+     * "entity", "single_data".
+     *
+     * In default process, the last value is kept.
+     *
+     * @var array
+     */
+    protected $fieldTypes = [
+        // Common metadata.
+        'resource_name' => 'string',
+        // "o:id" may be an identifier.
+        'o:id' => 'string',
+        'o:created' => 'datetime',
+        'o:modified' => 'datetime',
+        'o:is_public' => 'boolean',
+        'o:owner' => 'entity',
+        // Alias of 'o:owner'.
+        'o:email' => 'entity',
+    ];
+
+    /**
+     * @var \Omeka\File\TempFileFactory
+     */
+    protected $tempFileFactory;
+
+    /**
+     * @var \BulkImport\Mvc\Controller\Plugin\UpdateResource
+     */
+    protected $updateResource;
+
+    /**
      * @var ArrayObject
      */
     protected $base;
@@ -60,96 +108,44 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
     protected $actionUnidentified;
 
     /**
-     * @var string
+     * @var bool
      */
-    protected $actionIdentifier;
-
-    /**
-     * @var string
-     */
-    protected $actionMedia;
-
-    /**
-     * @var string
-     */
-    protected $actionItemSet;
-
-    /**
-     * Store the source identifiers for each index, reverted and mapped.
-     * Manage possible duplicate identifiers.
-     *
-     * The keys are filled during first loop and values when found or available.
-     *
-     * @todo Remove "mapx" and "revert" ("revert" is only used to get "mapx"). "mapx" is a short to map[source index]. But a source can have no identifier and only an index.
-     *
-     * @var array
-     */
-    protected $identifiers = [
-        // Source index to identifiers.
-        'source' => [],
-        // Identifiers to source indexes.
-        'revert' => [],
-        // Source indexes to resource id.
-        'mapx' => [],
-        // Source identifiers to resource id.
-        'map' => [],
-    ];
+    protected $allowDuplicateIdentifiers = false;
 
     /**
      * @var bool
      */
-    protected $hasMapping = false;
+    protected $skipMissingFiles = false;
 
     /**
-     * @todo Rename this variable, that is used in AbstractFullProcessor with a different meaning.
+     * @var bool
+     */
+    protected $fakeFiles = false;
+
+    /**
      * @var array
      */
-    protected $mapping;
+    protected $resourceNamesMore;
 
     /**
-     * @var int
+     * @var bool
      */
-    protected $totalToProcess = 0;
+    protected $useDatatypeLiteral = false;
 
     /**
-     * @var int
+     * @see \BulkImport\Job\ImportTrait
+     *
+     * @var array
      */
-    protected $totalIndexResources = 0;
+    protected $identifierNames = [
+        'o:id' => 'o:id',
+        // 'dcterms:identifier' => 10,
+    ];
 
     /**
      * @var int
      */
     protected $indexResource = 0;
-
-    /**
-     * @var int
-     */
-    protected $processing = 0;
-
-    /**
-     * @var int
-     */
-    protected $totalSkipped = 0;
-
-    /**
-     * @var int
-     */
-    protected $totalProcessed = 0;
-
-    /**
-     * @var int
-     */
-    protected $totalErrors = 0;
-
-    public function getResourceName(): ?string
-    {
-        return $this->resourceName;
-    }
-
-    public function getLabel(): string
-    {
-        return $this->resourceLabel;
-    }
 
     public function getConfigFormClass(): string
     {
@@ -161,7 +157,7 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
         return $this->paramsFormClass;
     }
 
-    public function handleConfigForm(Form $form)
+    public function handleConfigForm(Form $form): self
     {
         $values = $form->getData();
         $config = new ArrayObject;
@@ -171,1348 +167,430 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
         return $this;
     }
 
-    public function handleParamsForm(Form $form)
+    public function handleParamsForm(Form $form, ?string $mappingSerialized = null): self
     {
         $values = $form->getData();
         $params = new ArrayObject;
         $this->handleFormGeneric($params, $values);
         $this->handleFormSpecific($params, $values);
-        $params['mapping'] = $values['mapping'] ?? [];
+        $params['mapping'] = isset($mappingSerialized) ? unserialize($mappingSerialized) : ($params['values'] ?? []);
+        $files = $this->bulkFileUploaded->prepareFilesUploaded($values['files']['files'] ?? []);
+        if ($files) {
+            $params['files'] = $files;
+        } elseif ($params->offsetExists('files')) {
+            $params->offsetUnset('files');
+        }
         $this->setParams($params->getArrayCopy());
         return $this;
     }
 
-    protected function handleFormGeneric(ArrayObject $args, array $values): \BulkImport\Processor\Processor
-    {
-        $defaults = [
-            'processing' => 'stop_on_error',
-            'action' => null,
-            'action_unidentified' => null,
-            'identifier_name' => null,
-            'allow_duplicate_identifiers' => false,
-            'action_identifier_update' => null,
-            'action_media_update' => null,
-            'action_item_set_update' => null,
-
-            'value_datatype_literal' => false,
-
-            'o:resource_template' => null,
-            'o:resource_class' => null,
-            'o:thumbnail' => null,
-            'o:owner' => null,
-            'o:is_public' => null,
-
-            'entries_to_skip' => 0,
-            'entries_max' => 0,
-            'entries_by_batch' => null,
-        ];
-
-        $result = array_intersect_key($values, $defaults) + $args->getArrayCopy() + $defaults;
-        $result['allow_duplicate_identifiers'] = (bool) $result['allow_duplicate_identifiers'];
-        $args->exchangeArray($result);
-        return $this;
-    }
-
-    protected function handleFormSpecific(ArrayObject $args, array $values): \BulkImport\Processor\Processor
+    protected function handleFormGeneric(ArrayObject $args, array $values): self
     {
         return $this;
     }
 
-    public function process(): void
+    protected function handleFormSpecific(ArrayObject $args, array $values): self
     {
-        $this->initFileTrait();
+        return $this;
+    }
+
+    public function isValid(): bool
+    {
+        $result = $this->init();
+        if (!$result) {
+            $this->lastErrorMessage = true;
+        }
+        return parent::isValid();
+    }
+
+    protected function init(): bool
+    {
+        // Used for uploaded files.
+        $services = $this->getServiceLocator();
+        $this->tempFileFactory = $services->get('Omeka\File\TempFileFactory');
+        $this->updateResource = $services->get('ControllerPluginManager')->get('updateResource');
 
         $this->prepareAction();
-        if (empty($this->action)) {
-            return;
-        }
-
-        $this->prepareActionUnidentified();
-        if (empty($this->actionUnidentified)) {
-            return;
-        }
-
-        $this
-            ->prepareIdentifierNames()
-
-            ->prepareActionIdentifier()
-            ->prepareActionMedia()
-            ->prepareActionItemSet()
-
-            ->appendInternalParams()
-
-            ->prepareMapping();
-
-        $this->bulk->setAllowDuplicateIdentifiers($this->getParam('allow_duplicate_identifiers', false));
-
-        $this->totalToProcess = method_exists($this->reader, 'count')
-            ? $this->reader->count()
-            : null;
-
-        $this->base = $this->baseEntity();
-
-        $toSkip = (int) $this->getParam('entries_to_skip', 0);
-        if ($toSkip) {
-            $this->logger->notice(
-                $toSkip <= 1
-                    ? 'The first {count} entry is skipped by user.' // @translate
-                    : 'The first {count} entries are skipped by user.', // @translate
-                ['count' => $toSkip]
-            );
-        }
-
-        $maxEntries = (int) $this->getParam('entries_max', 0);
-        if ($maxEntries) {
-            $this->logger->notice(
-                $maxEntries <= 1
-                    ? 'Only {count} entry will be processed.' // @translate
-                    : 'Only {count} entries will be processed.', // @translate
-                ['count' => $maxEntries]
-            );
-        }
-
-        // Prepare the file where the checks will be saved.
-        $this
-            ->initializeCheckStore()
-            ->initializeCheckOutput();
-
         if ($this->totalErrors) {
-            $this
-                ->purgeCheckStore()
-                ->finalizeCheckOutput();
-            return;
-        }
-
-        // Store the file in params to get it in user interface and next.
-        /** @var \Omeka\Entity\Job $jobJob */
-        $jobJob = $this->job->getJob();
-        if ($jobJob->getId()) {
-            $jobJobArgs = $jobJob->getArgs();
-            $jobJobArgs['filename_check'] = basename($this->filepathCheck);
-            $jobJob->setArgs($jobJobArgs);
-            $entityManager = $this->getServiceLocator()->get('Omeka\EntityManager');
-            $entityManager->persist($jobJob);
-            $entityManager->flush();
-        }
-
-        $this->prepareListOfIdentifiers();
-
-        $this->prepareListOfIds();
-
-        // Reset counts.
-        $this->totalIndexResources = 0;
-        $this->indexResource = 0;
-        $this->processing = 0;
-        $this->totalSkipped = 0;
-        $this->totalProcessed = 0;
-        $this->totalErrors = 0;
-
-        $this->prepareFullRun();
-
-        $processingType = $this->getParam('processing', 'stop_on_error') ?: 'stop_on_error';
-        $dryRun = $processingType === 'dry_run';
-        if ($dryRun) {
-            $this->logger->notice(
-                'Processing is ended: dry run.' // @translate
-            );
-            $this
-                ->purgeCheckStore()
-                ->finalizeCheckOutput();
-            return;
-        }
-
-        if ($this->totalErrors) {
-            $this->logger->notice(
-                $this->totalErrors <= 1
-                    ? '{total} error has been found during checks.' // @translate
-                    : '{total} errors have been found during checks.', // @translate
-                ['total' => $this->totalErrors]
-            );
-            if ($processingType === 'stop_on_error') {
-                $this->logger->notice(
-                    'Processing is stopped because of error. No source was imported.' // @translate
-                );
-                $this
-                    ->purgeCheckStore()
-                    ->finalizeCheckOutput();
-                return;
-            }
-        }
-
-        // A stop may occur during dry run. Message is already logged.
-        if ($this->job->shouldStop()) {
-            $this
-                ->purgeCheckStore()
-                ->finalizeCheckOutput();
-            return;
-        }
-
-        // Reset counts.
-        $this->totalIndexResources = 0;
-        $this->indexResource = 0;
-        $this->processing = 0;
-        $this->totalSkipped = 0;
-        $this->totalProcessed = 0;
-        $this->totalErrors = 0;
-
-        $this->processFullRun();
-
-        $this
-            ->purgeCheckStore()
-            ->finalizeCheckOutput();
-    }
-
-    /**
-     * Get the list of identifiers without any check.
-     */
-    protected function prepareListOfIdentifiers(): \BulkImport\Processor\Processor
-    {
-        $this->identifiers = [
-            // Source index to identifiers.
-            'source' => [],
-            // Identifiers to source indexes.
-            'revert' => [],
-            // Source indexes to resource id.
-            'mapx' => [],
-            // Source identifiers to resource id.
-            'map' => [],
-        ];
-
-        $identifierNames = $this->bulk->getIdentifierNames();
-        if (empty($identifierNames)) {
-            return $this;
-        }
-
-        $this->logger->notice(
-            'Start listing all identifiers from source data.' // @translate
-        );
-
-        $toSkip = (int) $this->getParam('entries_to_skip', 0);
-        $maxEntries = (int) $this->getParam('entries_max', 0);
-        $maxRemaining = $maxEntries;
-
-        // Manage the case where the reader is zero-based or one-based.
-        $firstIndexBase = null;
-        foreach ($this->reader as $index => $entry) {
-            if (is_null($firstIndexBase)) {
-                $firstIndexBase = (int) empty($index);
-            }
-            if ($this->job->shouldStop()) {
-                $this->logger->warn(
-                    'Index #{index}: The job "Import" was stopped during initial listing of identifiers.', // @translate
-                    ['index' => $this->indexResource]
-                );
-                break;
-            }
-
-            if ($this->totalProcessed && $this->totalProcessed % 100 === 0) {
-                if ($this->totalToProcess) {
-                    $this->logger->notice(
-                        '{total_processed}/{total_resources} resources processed during initial listing of identifiers, {total_skipped} skipped or blank, {total_errors} errors.', // @translate
-                        [
-                            'total_processed' => $this->totalProcessed,
-                            'total_resources' => $this->totalToProcess,
-                            'total_skipped' => $this->totalSkipped,
-                            'total_errors' => $this->totalErrors,
-                        ]
-                    );
-                } else {
-                    $this->logger->notice(
-                        '{total_processed} resources processed during initial listing of identifiers, {total_skipped} skipped or blank, {total_errors} errors.', // @translate
-                        [
-                            'total_processed' => $this->totalProcessed,
-                            'total_skipped' => $this->totalSkipped,
-                            'total_errors' => $this->totalErrors,
-                        ]
-                    );
-                }
-            }
-
-            // The first entry is #1, but the iterator (array) may number it 0.
-            $this->indexResource = $index + $firstIndexBase;
-
-            if ($toSkip) {
-                --$toSkip;
-                continue;
-            }
-
-            if ($maxEntries) {
-                --$maxRemaining;
-                if ($maxRemaining < 0) {
-                    $this->logger->warn(
-                        'Index #{index}: The job "Import" was stopped during initial listing of identifiers: max {count} entries processed.', // @translate
-                        ['index' => $this->indexResource, 'count' => $maxEntries]
-                    );
-                    break;
-                }
-            }
-
-            ++$this->totalIndexResources;
-            $resource = $this->processEntry($entry);
-
-            $this->extractSourceIdentifiers($resource, $entry);
-        }
-
-        // Clean identifiers for duplicates.
-        $this->identifiers['source'] = array_map('array_unique', $this->identifiers['source']);
-        $this->identifiers['revert'] = array_map('array_unique', $this->identifiers['revert']);
-        $this->identifiers['mapx'] = array_map(function ($v) {
-            return $v ? (int) $v : null;
-        }, $this->identifiers['mapx']);
-        $this->identifiers['map'] = array_map(function ($v) {
-            return $v ? (int) $v : null;
-        }, $this->identifiers['map']);
-
-        $this->logger->notice(
-            'End of initial listing of identifiers: {total_resources} resources to process, {total_identifiers} unique identifiers, {total_skipped} skipped or blank, {total_processed} processed, {total_errors} errors.', // @translate
-            [
-                'total_resources' => $this->totalIndexResources,
-                'total_identifiers' => count($this->identifiers['map']),
-                'total_skipped' => $this->totalSkipped,
-                'total_processed' => $this->totalProcessed,
-                'total_errors' => $this->totalErrors,
-            ]
-        );
-
-        return $this;
-    }
-
-    /**
-     * Get the list of ids from identifiers one time.
-     */
-    protected function prepareListOfIds(): \BulkImport\Processor\Processor
-    {
-        if (empty($this->identifiers['map'])) {
-            return $this;
-        }
-
-        $this->logger->notice(
-            'Start preparing ids from {count} source identifiers.', // @translate
-            ['count' => count($this->identifiers['map'])]
-        );
-
-        // Process only identifiers without ids (normally all of them).
-        $emptyIdentifiers = array_filter($this->identifiers['map'], function($v) {
-            return empty($v);
-        });
-
-        $identifierNames = $this->bulk->getIdentifierNames();
-        $ids = $this->bulk->findResourcesFromIdentifiers(array_keys($emptyIdentifiers), $identifierNames);
-
-        $this->identifiers['map'] = array_replace($this->identifiers['map'], $ids);
-
-        // Fill mapx when possible.
-        foreach ($ids as $identifier => $id) {
-            if (!empty($this->identifiers['revert'][$identifier])) {
-                $this->identifiers['mapx'][reset($this->identifiers['revert'][$identifier])] = $id;
-            }
-        }
-
-        $this->identifiers['mapx'] = array_map(function ($v) {
-            return $v ? (int) $v : null;
-        }, $this->identifiers['mapx']);
-        $this->identifiers['map'] = array_map(function ($v) {
-            return $v ? (int) $v : null;
-        }, $this->identifiers['map']);
-
-        $this->logger->notice(
-            'End of initial listing of {total} ids from {count} source identifiers.', // @translate
-            ['total' => count(array_filter($this->identifiers['map'])), 'count' => count($this->identifiers['map'])]
-        );
-
-        return $this;
-    }
-
-    /**
-     * Check all source data (dry run).
-     *
-     * Check:
-     * - identifiers,
-     * - linked resources,
-     * - template values,
-     * - files presence.
-     *
-     * Prepare the list of identifiers one time too (existing and new ones).
-     *
-     * Store resources without errors for next step.
-     */
-    protected function prepareFullRun(): \BulkImport\Processor\Processor
-    {
-        $this->logger->notice(
-            'Start checking of source data.' // @translate
-        );
-
-        $toSkip = (int) $this->getParam('entries_to_skip', 0);
-        $maxEntries = (int) $this->getParam('entries_max', 0);
-        $maxRemaining = $maxEntries;
-
-        // TODO Do a first loop to get all identifiers and linked resources to speed up process.
-
-        // Manage the case where the reader is zero-based or one-based.
-        $firstIndexBase = null;
-        foreach ($this->reader as $index => $entry) {
-            if (is_null($firstIndexBase)) {
-                $firstIndexBase = (int) empty($index);
-            }
-            if ($this->job->shouldStop()) {
-                $this->logger->warn(
-                    'Index #{index}: The job "Import" was stopped during initial checks.', // @translate
-                    ['index' => $this->indexResource]
-                );
-                break;
-            }
-
-            if ($this->totalProcessed && $this->totalProcessed % 100 === 0) {
-                if ($this->totalToProcess) {
-                    $this->logger->notice(
-                        '{total_processed}/{total_resources} resources checked, {total_skipped} skipped or blank, {total_errors} errors inside data.', // @translate
-                        [
-                            'total_processed' => $this->totalProcessed,
-                            'total_resources' => $this->totalToProcess,
-                            'total_skipped' => $this->totalSkipped,
-                            'total_errors' => $this->totalErrors,
-                        ]
-                    );
-                } else {
-                    $this->logger->notice(
-                        '{total_processed} resources checked, {total_skipped} skipped or blank, {total_errors} errors inside data.', // @translate
-                        [
-                            'total_processed' => $this->totalProcessed,
-                            'total_skipped' => $this->totalSkipped,
-                            'total_errors' => $this->totalErrors,
-                        ]
-                    );
-                }
-            }
-
-            // The first entry is #1, but the iterator (array) may number it 0.
-            $this->indexResource = $index + $firstIndexBase;
-
-            if ($toSkip) {
-                $this->logCheckedResource(null, null);
-                --$toSkip;
-                continue;
-            }
-
-            if ($maxEntries) {
-                --$maxRemaining;
-                if ($maxRemaining < 0) {
-                    $this->logger->warn(
-                        'Index #{index}: The job "Import" was stopped during initial checks: max {count} entries checked.', // @translate
-                        ['index' => $this->indexResource, 'count' => $maxEntries]
-                    );
-                    break;
-                }
-            }
-
-            // TODO Reuse and complete the resource extracted during listing of identifiers: only the id may be missing. Or store during previous loop.
-            ++$this->totalIndexResources;
-            $resource = $this->processEntry($entry);
-            if (!$resource) {
-                $this->logCheckedResource(null, $entry);
-                continue;
-            }
-
-            if (!$this->checkEntity($resource)) {
-                ++$this->totalErrors;
-                $this->logCheckedResource($resource, $entry);
-                continue;
-            }
-
-            // ++$this->processing;
-            ++$this->totalProcessed;
-
-            $this->processing = 0;
-
-            // Only resources with messages are logged.
-            if (!$resource['messageStore']->hasErrors()) {
-                $this->storeCheckedResource($resource);
-            }
-
-            $this->logCheckedResource($resource, $entry);
-        }
-
-        $this->logger->notice(
-            'End of global check: {total_resources} resources to process, {total_skipped} skipped or blank, {total_processed} processed, {total_errors} errors inside data.', // @translate
-            [
-                'total_resources' => $this->totalIndexResources,
-                'total_skipped' => $this->totalSkipped,
-                'total_processed' => $this->totalProcessed,
-                'total_errors' => $this->totalErrors,
-            ]
-        );
-
-        return $this;
-    }
-
-    protected function processFullRun(): \BulkImport\Processor\Processor
-    {
-        $this->logger->notice(
-            'Start actual import of source data.' // @translate
-        );
-
-        $toSkip = (int) $this->getParam('entries_to_skip', 0);
-        $maxEntries = (int) $this->getParam('entries_max', 0);
-        $maxRemaining = $maxEntries;
-        $batch = (int) $this->getParam('entries_by_batch', self::ENTRIES_BY_BATCH);
-
-        /** @var \Doctrine\ORM\EntityManager $entityManager */
-        $entityManager = $this->getServiceLocator()->get('Omeka\EntityManager');
-
-        $shouldStop = false;
-        $dataToProcess = [];
-        // Manage the case where the reader is zero-based or one-based.
-        $firstIndexBase = null;
-        foreach ($this->reader as $index => $entry) {
-            if (is_null($firstIndexBase)) {
-                $firstIndexBase = (int) empty($index);
-            }
-            if ($shouldStop = $this->job->shouldStop()) {
-                $this->logger->warn(
-                    'Index #{index}: The job "Import" was stopped.', // @translate
-                    ['index' => $this->indexResource]
-                );
-                break;
-            }
-
-            if ($this->totalProcessed && $this->totalProcessed % 100 === 0) {
-                if ($this->totalToProcess) {
-                    $this->logger->notice(
-                        '{total_processed}/{total_resources} resources processed, {total_skipped} skipped or blank, {total_errors} errors inside data.', // @translate
-                        [
-                            'total_processed' => $this->totalProcessed,
-                            'total_resources' => $this->totalToProcess,
-                            'total_skipped' => $this->totalSkipped,
-                            'total_errors' => $this->totalErrors,
-                        ]
-                    );
-                } else {
-                    $this->logger->notice(
-                        '{total_processed} resources processed, {total_skipped} skipped or blank, {total_errors} errors inside data.', // @translate
-                        [
-                            'total_processed' => $this->totalProcessed,
-                            'total_skipped' => $this->totalSkipped,
-                            'total_errors' => $this->totalErrors,
-                        ]
-                    );
-                }
-            }
-
-            if ($toSkip) {
-                --$toSkip;
-                continue;
-            }
-
-            ++$this->totalIndexResources;
-            // The first entry is #1, but the iterator (array) may number it 0.
-            $this->indexResource = $index + $firstIndexBase;
-
-            if ($maxEntries) {
-                --$maxRemaining;
-                if ($maxRemaining < 0) {
-                    break;
-                }
-            }
-
-            // TODO Clarify computation of total errors.
-            $resource = $this->loadCheckedResource();
-            if (!$resource) {
-                ++$this->totalErrors;
-                continue;
-            }
-
-            $this->logger->info(
-                'Index #{index}: Process started', // @translate
-                ['index' => $this->indexResource]
-            );
-
-            ++$this->processing;
-            ++$this->totalProcessed;
-
-//             $dataToProcess[] = is_array($resource) ? $resource : $resource->getArrayCopy();
-            $dataToProcess[] = $resource;
-
-            // Only add every X for batch import (1 by default anyway).
-            if ($this->processing >= $batch) {
-                $this->processEntities($dataToProcess);
-                // Avoid memory issue.
-                unset($dataToProcess);
-                $entityManager->flush();
-                $entityManager->clear();
-                // Reset for next batch.
-                $dataToProcess = [];
-                $this->processing = 0;
-            }
-        }
-
-        // Take care of remainder from the modulo check.
-        if (!$shouldStop && $dataToProcess) {
-            $this->processEntities($dataToProcess);
-            // Avoid memory issue.
-            unset($dataToProcess);
-            $entityManager->flush();
-            $entityManager->clear();
-        }
-
-        if ($maxEntries && $maxRemaining < 0) {
-            $this->logger->warn(
-                'Index #{index}: The job "Import" was stopped: max {count} entries processed.', // @translate
-                ['index' => $this->indexResource, 'count' => $maxEntries]
-            );
-        }
-
-        $this->logger->notice(
-            'End of process: {total_resources} resources to process, {total_skipped} skipped or blank, {total_processed} processed, {total_errors} errors inside data. Note: errors can occur separately for each imported file.', // @translate
-            [
-                'total_resources' => $this->totalIndexResources,
-                'total_skipped' => $this->totalSkipped,
-                'total_processed' => $this->totalProcessed,
-                'total_errors' => $this->totalErrors,
-            ]
-        );
-
-        return $this;
-    }
-
-    /**
-     * Process one entry to create one resource (and eventually attached ones).
-     */
-    protected function processEntry(Entry $entry): ?ArrayObject
-    {
-        if ($entry->isEmpty()) {
-            ++$this->totalSkipped;
-            return null;
-        }
-
-        return $this->hasMapping
-            ? $this->processEntryWithMapping($entry)
-            : $this->processEntryDirectly($entry);
-    }
-
-    /**
-     * Convert a prepared entry into a resource, setting ids for each key.
-     *
-     * So fill owner id, resource template id, resource class id, property ids.
-     * Check boolean values too for is public and is open.
-     */
-    protected function processEntryDirectly(Entry $entry): ArrayObject
-    {
-        /** @var \ArrayObject $resource */
-        $resource = clone $this->base;
-
-        $resource['source_index'] = $entry->index();
-
-        // Added for security.
-        $skipKeys = [
-            'checked_id' => null,
-            'source_index' => 0,
-            'messageStore' => null,
-        ];
-
-        // List of keys that can have only one value.
-        // Cf. baseSpecific(), fillItem(), fillItemSet() and fillMedia().
-        $booleanKeys = [
-            'o:is_public' => true,
-            'o:is_open' => true,
-        ];
-
-        $singleDataKeys = [
-            // Generic.
-            'o:id' => null,
-            // Resource.
-            'resource_name' => null,
-            // Media.
-            'o:lang' => null,
-            'o:ingester' => null,
-            'o:source' => null,
-            'ingest_filename' => null,
-            'ingest_directory' => null,
-            'ingest_url' => null,
-            'html' => null,
-        ];
-
-        // Keys that can have only one value that is an entity with an id.
-        $singleEntityKeys = [
-            // Generic.
-            'o:resource_template' => null,
-            'o:resource_class' => null,
-            'o:thumbnail' => null,
-            'o:owner' => null,
-            // Media.
-            'o:item' => null,
-        ];
-
-        foreach ($entry as $key => $values) {
-            if (array_key_exists($key, $skipKeys)) {
-                // Nothing to do.
-            } elseif (array_key_exists($key, $booleanKeys)) {
-                $this->fillBoolean($resource, $key, $values);
-            } elseif (array_key_exists($key, $singleDataKeys)) {
-                $resource[$key] = $values;
-            } elseif (array_key_exists($key, $singleEntityKeys)) {
-                $this->fillSingleEntity($resource, $key, $values);
-            } elseif ($resource->offsetExists($key) && is_array($resource[$key])) {
-                $resource[$key] = array_merge($resource[$key], $values);
-            } else {
-                // Keep multiple entity keys (below) and extra data for modules.
-                $resource[$key] = $values;
-            }
-        }
-
-        // Clean the property id in all cases.
-        $properties = $this->bulk->getPropertyIds();
-        foreach (array_intersect_key($resource->getArrayCopy(), $properties) as $term => $values) {
-            foreach (array_keys($values) as $key) {
-                $resource[$term][$key]['property_id'] = $properties[$term];
-            }
-        }
-
-        // TODO Fill the source identifiers of the main resource.
-
-        $fillPropertiesAndResourceData = function (array $resourceArray) use ($properties, $booleanKeys, $singleEntityKeys): array {
-            // Fill the properties.
-            foreach (array_intersect_key($resourceArray, $properties) as $term => $values) {
-                foreach (array_keys($values) as $key) {
-                    $resourceArray[$term][$key]['property_id'] = $properties[$term];
-                }
-            }
-            // Fill other metadata (for media and item set).
-            $resourceObject = new ArrayObject($resourceArray);
-            foreach (array_keys($booleanKeys) as $key) {
-                if (array_key_exists($key, $resourceArray)) {
-                    $this->fillBoolean($resourceObject, $key, $resourceObject[$key]);
-                }
-            }
-            foreach (array_keys($singleEntityKeys) as $key) {
-                if (array_key_exists($key, $resourceArray)) {
-                    $this->fillSingleEntity($resourceObject, $key, $resourceObject[$key]);
-                }
-            }
-            // TODO Fill the source identifiers of related resources.
-            return $resourceObject->getArrayCopy();
-        };
-
-        // Do the same for sub-resources (multiple entity keys: ''o:media" and
-        // "o:item_set" for items).
-        foreach (['o:item_set', 'o:media'] as $key) {
-            if (!empty($resource[$key])) {
-                foreach ($resource[$key] as &$resourceData) {
-                    $resourceData = $fillPropertiesAndResourceData($resourceData);
-                }
-            }
-        }
-
-        return $resource;
-    }
-
-    protected function processEntryWithMapping(Entry $entry): ArrayObject
-    {
-        /** @var \ArrayObject $resource */
-        $resource = clone $this->base;
-        $resource['source_index'] = $entry->index();
-        $resource['messageStore']->clearMessages();
-
-        $this->skippedSourceFields = [];
-        foreach ($this->mapping as $sourceField => $targets) {
-            // Check if the entry has a value for this source field.
-            if (!isset($entry[$sourceField])) {
-                // Probably an issue in the config.
-                /*
-                // TODO Warn when it is not a multisheet. Check updates with a multisheet.
-                if (!$entry->offsetExists($sourceField)) {
-                    $resource['messageStore']->addWarning('values', new PsrMessage(
-                        'The source field "{field}" is set in the mapping, but not in the entry. The params may have an issue.', // @translate
-                        ['field' => $sourceField]
-                    ));
-                }
-                */
-                $this->skippedSourceFields[] = $sourceField;
-                continue;
-            }
-
-            $values = $entry[$sourceField];
-            if (!count($values)) {
-                $this->skippedSourceFields[] = $sourceField;
-                continue;
-            }
-
-            $this->fillResource($resource, $targets, $values);
-        }
-
-        return $resource;
-    }
-
-    protected function baseEntity(): ArrayObject
-    {
-        // TODO Use a specific class that extends ArrayObject to manage process metadata (check and errors).
-        $resource = new ArrayObject;
-        $resource['o:id'] = null;
-        $resource['source_index'] = 0;
-        $resource['checked_id'] = false;
-        $resource['messageStore'] = new MessageStore();
-        $this->baseGeneric($resource);
-        $this->baseSpecific($resource);
-        return $resource;
-    }
-
-    protected function baseGeneric(ArrayObject $resource): \BulkImport\Processor\Processor
-    {
-        $resourceTemplateId = $this->getParam('o:resource_template');
-        if ($resourceTemplateId) {
-            $resource['o:resource_template'] = ['o:id' => $resourceTemplateId];
-        }
-        $resourceClassId = $this->getParam('o:resource_class');
-        if ($resourceClassId) {
-            $resource['o:resource_class'] = ['o:id' => $resourceClassId];
-        }
-        $thumbnailId = $this->getParam('o:thumbnail');
-        if ($thumbnailId) {
-            $resource['o:thumbnail'] = ['o:id' => $thumbnailId];
-        }
-        $ownerId = $this->getParam('o:owner', 'current') ?: 'current';
-        if ($ownerId === 'current') {
-            $identity = $this->getServiceLocator()->get('ControllerPluginManager')
-                ->get('identity');
-            $ownerId = $identity()->getId();
-        }
-        $resource['o:owner'] = ['o:id' => $ownerId];
-        $resource['o:is_public'] = $this->getParam('o:is_public') !== 'false';
-        return $this;
-    }
-
-    protected function baseSpecific(ArrayObject $resource): \BulkImport\Processor\Processor
-    {
-        return $this;
-    }
-
-    protected function fillResource(ArrayObject $resource, array $targets, array $values): \BulkImport\Processor\Processor
-    {
-        foreach ($targets as $target) {
-            switch ($target['target']) {
-                case $this->fillProperty($resource, $target, $values):
-                    break;
-                case $this->fillGeneric($resource, $target, $values):
-                    break;
-                case $this->fillSpecific($resource, $target, $values):
-                    break;
-                default:
-                    // The resource name should be set only in fillSpecific.
-                    if ($target['target'] !== 'resource_name') {
-                        $resource[$target['target']] = end($values);
-                    }
-                    break;
-            }
-        }
-        return $this;
-    }
-
-    protected function fillProperty(ArrayObject $resource, $target, array $values): bool
-    {
-        // Return true in all other cases, when this is a property process, with
-        // or without issue.
-        if (!isset($target['value']['property_id'])) {
             return false;
         }
 
-        if (!empty($target['value']['type'])) {
-            $datatypeNames = [$target['value']['type']];
-        } elseif (!empty($target['datatype'])) {
-            $datatypeNames = $target['datatype'];
-        } else {
-            // Normally not possible, so use "literal", whatever the option is.
-            $datatypeNames = ['literal'];
+        $this->prepareActionUnidentified();
+        if ($this->totalErrors) {
+            return false;
         }
 
-        // The datatype should be checked for each value. The value is checked
-        // against each datatype and get the first valid one.
-        // TODO Factorize instead of doing check twice.
-        foreach ($values as $value) {
-            $hasDatatype = false;
-            // The data type name is normally already checked, but may be empty.
-            foreach ($datatypeNames as $datatypeName) {
-                /** @var \Omeka\DataType\DataTypeInterface $datatype */
-                $datatype = $this->bulk->getDataType($datatypeName);
-                if (!$datatype) {
-                    continue;
-                }
-                $datatypeName = $datatype->getName();
-                $target['value']['type'] = $datatypeName;
-                if ($datatypeName === 'literal') {
-                    $this->fillPropertyForValue($resource, $target, $value);
-                    $hasDatatype = true;
-                    break;
-                } elseif (substr($datatypeName, 0, 8) === 'resource') {
-                    $vrId = $this->identifiers['map'][$value]
-                        ?? $this->bulk->findResourceFromIdentifier($value, null, $datatypeName, $resource['messageStore']);
-                    // Normally always true after first loop: all identifiers
-                    // are stored first.
-                    if ($vrId || array_key_exists($value, $this->identifiers['map'])) {
-                        $this->fillPropertyForValue($resource, $target, $value, $vrId ? (int) $vrId : null);
-                        $hasDatatype = true;
-                        break;
-                    }
-                } elseif (substr($datatypeName, 0, 11) === 'customvocab') {
-                    // The resource is not checked for custom vocab member here.
-                    if ($this->bulk->getCustomVocabBaseType($datatypeName) === 'resource') {
-                        $vrId = $this->identifiers['map'][$value]
-                            ?? $this->bulk->findResourceFromIdentifier($value, null, $datatypeName, $resource['messageStore']);
-                        // Normally always true after first loop: all
-                        // identifiers are stored first.
-                        if ($vrId || array_key_exists($value, $this->identifiers['map'])) {
-                            $this->fillPropertyForValue($resource, $target, $value, $vrId ? (int) $vrId : null);
-                            $hasDatatype = true;
-                            break;
-                        }
-                    } elseif ($this->bulk->isCustomVocabMember($datatypeName, $value)) {
-                        $this->fillPropertyForValue($resource, $target, $value);
-                        $hasDatatype = true;
-                        break;
-                    }
-                } elseif (substr($datatypeName, 0, 3) === 'uri'
-                    || substr($datatypeName, 0, 12) === 'valuesuggest'
-                ) {
-                    if ($this->bulk->isUrl($value)) {
-                        $this->fillPropertyForValue($resource, $target, $value);
-                        $hasDatatype = true;
-                        break;
-                    }
-                } else {
-                    // Some data types may be more complex than "@value", but it
-                    // manages most of the common other modules.
-                    $valueArray = [
-                        '@value' => $value,
-                    ];
-                    if ($datatype->isValid($valueArray)) {
-                        $this->fillPropertyForValue($resource, $target, $value);
-                        $hasDatatype = true;
-                        break;
-                    }
-                }
-            }
-            // TODO Add an option for literal data-type by default.
-            if (!$hasDatatype) {
-                if ($this->getParam('value_datatype_literal')) {
-                    $targetLiteral = $target;
-                    $targetLiteral['value']['type'] = 'literal';
-                    $this->fillPropertyForValue($resource, $targetLiteral, $value);
-                    if ($this->bulk->getMainDataType(reset($datatypeNames)) === 'resource') {
-                        $resource['messageStore']->addNotice('values', new PsrMessage(
-                            'The value "{value}" is not compatible with datatypes "{datatypes}". Try to create the resource first. Data type "literal" is used.', // @translate
-                            ['value' => mb_substr((string) $value, 0, 50), 'datatypes' => implode('", "', $datatypeNames)]
-                        ));
-                    } else {
-                        $resource['messageStore']->addNotice('values', new PsrMessage(
-                            'The value "{value}" is not compatible with datatypes "{datatypes}". Data type "literal" is used.', // @translate
-                            ['value' => mb_substr((string) $value, 0, 50), 'datatypes' => implode('", "', $datatypeNames)]
-                        ));
-                    }
-                } else {
-                    if ($this->bulk->getMainDataType(reset($datatypeNames)) === 'resource') {
-                        $resource['messageStore']->addError('values', new PsrMessage(
-                            'The value "{value}" is not compatible with datatypes "{datatypes}". Try to create resource first. Or try to add "literal" to datatypes or default to it.', // @translate
-                            ['value' => mb_substr((string) $value, 0, 50), 'datatypes' => implode('", "', $datatypeNames)]
-                        ));
-                    } else {
-                        $resource['messageStore']->addError('values', new PsrMessage(
-                            'The value "{value}" is not compatible with datatypes "{datatypes}". Try to add "literal" to datatypes or default to it.', // @translate
-                            ['value' => mb_substr((string) $value, 0, 50), 'datatypes' => implode('", "', $datatypeNames)]
-                        ));
-                    }
-                }
-            }
+        $errorStore = new MessageStore();
+        $files = $this->params['files'] ?? [];
+        $this->bulkFileUploaded
+            ->setErrorStore($errorStore)
+            ->setFilesUploaded($files)
+            ->prepareFilesZip();
+        if ($errorStore->hasErrors()) {
+            ++$this->totalErrors;
+            return false;
         }
+
+        $this->logger->notice(
+            'The process will run action "{action}" with option "{mode}" for unindentified resources.', // @translate
+            ['action' => $this->action, 'mode' => $this->actionUnidentified]
+        );
+
+        $this
+            ->prepareSpecific();
+        if ($this->totalErrors) {
+            return false;
+        }
+
+        $this->allowDuplicateIdentifiers = (bool) $this->getParam('allow_duplicate_identifiers', false);
+        $this->fakeFiles = (bool) $this->getParam('fake_files', false);
+        $this->identifierNames = $this->getParam('identifier_name', $this->identifierNames);
+        $this->skipMissingFiles = (bool) $this->getParam('skip_missing_files', false);
+
+        $this->bulkIdentifiers->setAllowDuplicateIdentifiers($this->allowDuplicateIdentifiers);
+
+        // Parameter specific to resources.
+        $this->useDatatypeLiteral = (bool) $this->getParam('value_datatype_literal');
+
+        // Check for FileSideload: remove files after import is not possible
+        // because of the multi-step process and the early check of files.
+        // TODO Allow to use FileSideload option "file_sideload_delete_file".
+        if ($this->settings->get('file_sideload_delete_file') === 'yes') {
+            // This is not an error: the input data may not use sideload files.
+            $this->logger->warn(
+                'The option to delete files (module File Sideload) is not fully supported currently. Check config of the module or use urls.' // @translate
+            );
+        }
+
+        $translate = $services->get('ViewHelperManager')->get('translate');
+        $this->resourceNamesMore = [
+            // For compatibility with spreadsheet used in Omeka classic.
+            'collection' => 'item_sets',
+            'collections' => 'item_sets',
+            'file' => 'media',
+            'files' => 'media',
+            $translate('asset') => 'assets',
+            $translate('item') => 'items',
+            $translate('item set') => 'item_sets',
+            $translate('media') => 'media',
+            $translate('assets') => 'assets',
+            $translate('items') => 'items',
+            $translate('item sets') => 'item_sets',
+            $translate('medias') => 'media',
+            $translate('media') => 'media',
+            $translate('collection') => 'item_sets',
+            $translate('collections') => 'item_sets',
+            $translate('file') => 'media',
+            $translate('files') => 'media',
+        ];
+
+        // The base entity depends on the resource type, so it should be init.
+        // Prepare it one time for performance, but can be completed with
+        // getPreparedBase().
+        $this->prepareBaseEntity();
 
         return true;
     }
 
-    protected function fillPropertyForValue(ArrayObject $resource, $target, $value, ?int $vrId = null): bool
+    protected function prepareAction(): self
     {
-        // Prepare the new resource value from the target.
-        $resourceValue = $target['value'];
-        $datatype = $resourceValue['type'];
-        switch ($datatype) {
-            default:
-            case 'literal':
-                $resourceValue['@value'] = $value;
-                break;
-
-            // "uri-label" is deprecated: use simply "uri".
-            case 'uri-label':
-            case 'uri':
-            case substr($datatype, 0, 12) === 'valuesuggest':
-                if (strpos($value, ' ')) {
-                    list($uri, $label) = explode(' ', $value, 2);
-                    $label = trim($label);
-                    if (!strlen($label)) {
-                        $label = null;
-                    }
-                    $resourceValue['@id'] = $uri;
-                    $resourceValue['o:label'] = $label;
-                } else {
-                    $resourceValue['@id'] = $value;
-                    // $resourceValue['o:label'] = null;
-                }
-                break;
-
-            case 'resource':
-            case 'resource:item':
-            case 'resource:itemset':
-            case 'resource:media':
-                $resourceValue['value_resource_id'] = $vrId;
-                $resourceValue['@language'] = null;
-                $resourceValue['source_identifier'] = $value;
-                break;
-
-            case substr($datatype, 0, 11) === 'customvocab':
-                $customVocabBaseType = $this->bulk->getCustomVocabBaseType($datatype);
-                $result = $this->bulk->isCustomVocabMember($datatype, $vrId ?? $value);
-                if ($result || ($customVocabBaseType === 'resource' && !$vrId)) {
-                    switch ($customVocabBaseType) {
-                        default:
-                        case 'literal':
-                            $resourceValue['@value'] = $value;
-                            break;
-                        case 'uri':
-                            if (strpos($value, ' ')) {
-                                list($uri, $label) = explode(' ', $value, 2);
-                                $label = trim($label);
-                                if (!strlen($label)) {
-                                    $label = null;
-                                }
-                                $resourceValue['@id'] = $uri;
-                                $resourceValue['o:label'] = $label;
-                            } else {
-                                $resourceValue['@id'] = $value;
-                                // $resourceValue['o:label'] = null;
-                            }
-                            break;
-                        case 'resource':
-                            $resourceValue['value_resource_id'] = $vrId;
-                            $resourceValue['@language'] = null;
-                            // TODO Check identifier as member of custom vocab later.
-                            $resourceValue['source_identifier'] = $value;
-                            break;
-                    }
-                } else {
-                    if ($this->getParam('value_datatype_literal')) {
-                        $resourceValue['@value'] = $value;
-                        $resourceValue['type'] = 'literal';
-                        $resource['messageStore']->addNotice('values', new PsrMessage(
-                            'The value "{value}" is not member of custom vocab "{customvocab}". A literal value is used instead.', // @translate
-                            ['value' => mb_substr((string) $value, 0, 50), 'customvocab' => $datatype]
-                        ));
-                    } else {
-                        $resource['messageStore']->addError('values', new PsrMessage(
-                            'The value "{value}" is not member of custom vocab "{customvocab}".', // @translate
-                            ['value' => mb_substr((string) $value, 0, 50), 'customvocab' => $datatype]
-                        ));
-                    }
-                }
-                break;
-
-            // TODO Support other special data types for geometry, numeric, etc.
+        $this->action = $this->getParam('action') ?: self::ACTION_CREATE;
+        if (!in_array($this->action, [
+            self::ACTION_CREATE,
+            self::ACTION_APPEND,
+            self::ACTION_REVISE,
+            self::ACTION_UPDATE,
+            self::ACTION_REPLACE,
+            self::ACTION_DELETE,
+            self::ACTION_SKIP,
+        ])) {
+            ++$this->totalErrors;
+            $this->logger->err(
+                'Action "{action}" is not managed.', // @translate
+                ['action' => $this->action]
+            );
         }
-        $resource[$target['target']][] = $resourceValue;
-
-        return true;
+        return $this;
     }
 
-    protected function fillGeneric(ArrayObject $resource, $target, array $values): bool
+    protected function prepareActionUnidentified(): self
     {
-        switch ($target['target']) {
-            case 'o:id':
-                $value = (int) end($values);
-                if (!$value) {
-                    return true;
-                }
-                $resourceName = $resource['resource_name'] ?? null;
-                $id = $this->identifiers['mapx'][$resource['source_index']]
-                    ?? $this->bulk->findResourceFromIdentifier($value, 'o:id', $resourceName, $resource['messageStore']);
-                if ($id) {
-                    $resource['o:id'] = $id;
-                    $resource['checked_id'] = !empty($resourceName) && $resourceName !== 'resources';
-                } else {
-                    $resource['messageStore']->addError('resource', new PsrMessage(
-                        'Internal id #{id} cannot be found. The entry is skipped.', // @translate
-                        ['id' => $id]
-                    ));
-                }
-                return true;
-
-            case 'o:resource_template':
-                $value = end($values);
-                if (!$value) {
-                    return true;
-                }
-                if (is_array($value)) {
-                    $id = empty($value['o:id']) ? null : $value['o:id'];
-                    $label = empty($value['o:label']) ? null : $value['o:label'];
-                    $value = $id ?? $label ?? reset($value);
-                }
-                $id = $this->bulk->getResourceTemplateId($value);
-                if ($id) {
-                    $resource['o:resource_template'] = empty($label)
-                        ? ['o:id' => $id]
-                        : ['o:id' => $id, 'o:label' => $label];
-                } else {
-                    $resource['messageStore']->addError('template', new PsrMessage(
-                        'The resource template "{source}" does not exist.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return true;
-
-            case 'o:resource_class':
-                $value = end($values);
-                if (!$value) {
-                    return true;
-                }
-                if (is_array($value)) {
-                    $id = empty($value['o:id']) ? null : $value['o:id'];
-                    $term = empty($value['o:term']) ? null : $value['o:term'];
-                    $value = $id ?? $term ?? reset($value);
-                }
-                $id = $this->bulk->getResourceClassId($value);
-                if ($id) {
-                    $resource['o:resource_class'] = empty($term)
-                        ? ['o:id' => $id]
-                        : ['o:id' => $id, 'o:term' => $term];
-                } else {
-                    $resource['messageStore']->addError('values', new PsrMessage(
-                        'The resource class "{source}" does not exist.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return true;
-
-            case 'o:thumbnail':
-                $value = end($values);
-                if (!$value) {
-                    return true;
-                }
-                if (is_array($value)) {
-                    $id = empty($value['o:id']) ? null : $value['o:id'];
-                    $url = empty($value['ingest_url']) ? null : $value['ingest_url'];
-                    $altText = empty($value['o:alt_text']) ? null : $value['o:alt_text'];
-                    $value = $id ?? $url ?? null;
-                }
-                if (is_numeric($value)) {
-                    $id = $this->bulk->getAssetId($value);
-                } elseif (is_string($value)) {
-                    // TODO Temporary creation of the asset.
-                    $asset = $this->createAssetFromUrl($value, $resource['messageStore']);
-                    $id = $asset ? $asset->getId() : null;
-                }
-                if ($id) {
-                    $resource['o:thumbnail'] = empty($altText)
-                        ? ['o:id' => $id]
-                        // TODO Check if the alt text is updated.
-                        : ['o:id' => $id, 'o:alt_text' => $altText];
-                } else {
-                    $resource['messageStore']->addError('values', new PsrMessage(
-                        'The thumbnail "{source}" does not exist or cannot be created.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return true;
-
-            case 'o:owner':
-                $value = end($values);
-                if (!$value) {
-                    return true;
-                }
-                if (is_array($value)) {
-                    $id = empty($value['o:id']) ? null : $value['o:id'];
-                    $email = empty($value['o:email']) ? null : $value['o:email'];
-                    $value = $id ?? $email ?? reset($value);
-                }
-                $id = $this->bulk->getUserId($value);
-                if ($id) {
-                    $resource['o:owner'] = empty($email)
-                        ? ['o:id' => $id]
-                        : ['o:id' => $id, 'o:email' => $email];
-                } else {
-                    $resource['messageStore']->addError('values', new PsrMessage(
-                        'The user "{source}" does not exist.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return true;
-
-            case 'o:email':
-                $value = end($values);
-                if (!$value) {
-                    return true;
-                }
-                $id = $this->bulk->getUserId($value);
-                if ($id) {
-                    $resource['o:owner'] = ['o:id' => $id, 'o:email' => $value];
-                } else {
-                    $resource['messageStore']->addError('values', new PsrMessage(
-                        'The user "{source}" does not exist.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return true;
-
-            case 'o:is_public':
-                $value = (string) end($values);
-                $resource['o:is_public'] = in_array(strtolower($value), ['0', 'false', 'no', 'off', 'private'], true)
-                    ? false
-                    : (bool) $value;
-                return true;
-
-            case 'o:created':
-            case 'o:modified':
-                $value = end($values);
-                $resource[$target['target']] = is_array($value)
-                    ? $value
-                    : ['@value' => substr_replace('0000-00-00 00:00:00', $value, 0, strlen($value))];
-                return true;
-
-            default:
-                return false;
+        $this->actionUnidentified = $this->getParam('action_unidentified') ?: self::ACTION_SKIP;
+        if (!in_array($this->actionUnidentified, [
+            'error',
+            self::ACTION_CREATE,
+            self::ACTION_SKIP,
+        ])) {
+            ++$this->totalErrors;
+            $this->logger->err(
+                'Action "{action}" for unidentified resource is not managed.', // @translate
+                ['action' => $this->actionUnidentified]
+            );
         }
+        return $this;
     }
 
-    protected function fillSpecific(ArrayObject $resource, $target, array $values): bool
+    protected function prepareSpecific(): self
     {
-        return false;
+        return $this;
     }
 
-    protected function fillBoolean(ArrayObject $resource, $key, $value): \BulkImport\Processor\Processor
+    protected function prepareBaseEntity(): self
     {
-        $resource[$key] = in_array(strtolower((string) $value), ['0', 'false', 'no', 'off', 'private', 'closed'], true)
-            ? false
-            : (bool) $value;
+        // ArrayObject is used internally to simplify calling functions.
+        // TODO Use a specific class that extends ArrayObject to manage process metadata (check and errors).
+        $resource = new ArrayObject;
+        $resource['resource_name'] = $this->getResourceName();
+        $resource['o:id'] = null;
+        // The human source index is one-based, so "0" means undetermined.
+        $resource['source_index'] = 0;
+        $resource['checked_id'] = false;
+        $resource['messageStore'] = new MessageStore();
+        $this->prepareBaseEntitySpecific($resource);
+        $this->base = $resource;
+        return $this;
+    }
+
+    protected function prepareBaseEntitySpecific(ArrayObject $resource): self
+    {
+        return $this;
+    }
+
+    protected function getPreparedBase(): ArrayObject
+    {
+        $result = clone $this->base;
+        // Clone does not clone sub-object, so init it here.
+        $result['messageStore'] = new MessageStore();
+        return $result;
+    }
+
+    public function fillResource(array $data, ?int $index = null): ?array
+    {
+        $resource = $this->getPreparedBase();
+
+        $this->indexResource = $index;
+        $resource['source_index'] = $this->indexResource;
+
+        $this
+            // Fill the resource with data.
+            ->fillResourceData($resource, $data)
+            // Specific values may have been processed.
+            // Other values are copied as array of values in the resource.
+            // So generally data are useless here, except for entities.
+            ->fillResourceFields($resource, $data)
+        ;
+
+        return $resource->getArrayCopy();
+    }
+
+    /**
+     * Fill resource with fields according to base field types.
+     *
+     * In this abstract processor, the first step is to simplify, not to fill or
+     * to check.
+     */
+    protected function fillResourceData(ArrayObject $resource, array $data): self
+    {
+        // Internal keys of the base entities to skip.
+        $baseMetadataTypes = [
+            'source_index' => 'skip',
+            'checked_id' => 'skip',
+            'messageStore' => 'skip',
+        ];
+
+        // The generic resource contains all field types of specific resources.
+
+        $currentFieldTypes = empty($resource['resource_name']) || $resource['resource_name'] === $this->resourceName
+            ? $this->fieldTypes
+            : $this->getFieldTypesForResource($resource['resource_name']);
+        $metadataTypes = $baseMetadataTypes + $currentFieldTypes;
+
+        // The values are always a list get from the meta mapper mapping.
+        // TODO Why are the values always a list get from the meta mapper mapping? (manage the case of multiple identifiers).
+        foreach ($data as $field => $values) switch ($metadataTypes[$field] ?? null) {
+            case 'skip':
+                // Nothing to do.
+                break;
+            case 'boolean':
+            case 'integer':
+            case 'string':
+            case 'array':
+                $resource[$field] = is_array($values) ? end($values) : $values;
+                break;
+            case 'datetime':
+                $value = is_array($values) ? end($values) : $values;
+                $resource[$field] = ['@value' => $value];
+                break;
+            case 'datetimes':
+                if (!is_array($values)) {
+                    $values = [$values];
+                }
+                foreach ($values as $value) {
+                    $resource[$field][] = ['@value' => $value];
+                }
+                break;
+            /* // Don't fill entities here: they require other data to check.
+            case 'entity':
+                $value = end($values);
+                $resource[$field] = $this->fillEntity($resource, $field, $value);
+                break;
+            case 'entities':
+                foreach ($values as $value) {
+                    $this->fillEntity($resource, $field, $value, true);
+                }
+                break;
+            */
+            case 'booleans':
+            case 'integers':
+            case 'strings':
+            case 'arrays':
+            default:
+                $resource[$field] = is_array($values) ? $values : [$values];
+                break;
+        }
+
         return $this;
     }
 
     /**
-     * @todo Factorize with fillGeneric().
+     * Fill other data that are not managed in a common way.
+     *
+     * Specific values set in metadataTypes have been processed.
+     * Other values are already copied as an array of values.
      */
-    protected function fillSingleEntity(ArrayObject $resource, $key, $value): \BulkImport\Processor\Processor
+    protected function fillResourceFields(ArrayObject $resource, array $data): self
     {
-        if (empty($value)) {
-            $resource[$key] = null;
+        return $this
+            // Fill the resource name first when possible then id, because they
+            // are the base to fill other data.
+            ->fillResourceName($resource, $data)
+            ->fillResourceId($resource, $data)
+            ->fillResourceSingleEntities($resource, $data)
+            ->fillResourceSpecific($resource, $data)
+        ;
+    }
+
+    /**
+     * Normalize the resource name.
+     */
+    protected function fillResourceName(ArrayObject $resource, array $data): self
+    {
+        if (isset($resource['resource_name'])
+            // Don't revalidate data from the resource base entity.
+            && $resource['resource_name'] !== $this->resourceName
+        ) {
+            $resource['resource_name'] = $this->easyMeta->resourceName($resource['resource_name'])
+                ?? $this->easyMeta->resourceName(mb_strtolower($resource['resource_name']))
+                ?? $this->resourceNamesMore[mb_strtolower($resource['resource_name'])]
+                ?? $resource['resource_name'];
+        }
+        return $this;
+    }
+
+    protected function fillResourceId(ArrayObject $resource, array $data): self
+    {
+        // Warning: "o:id" may be an identifier here, so it is converted.
+        // Furthermore, the id may be set via another key (dcterms:identifier,
+        // storage id, etc.).
+        if (empty($resource['o:id'])) {
+            $resource['o:id'] = null;
             return $this;
         }
 
-        // Get the entity id.
-        switch ($key) {
-            case 'o:resource_template':
-                if (is_array($value)) {
-                    $id = empty($value['o:id']) ? null : $value['o:id'];
-                    $label = empty($value['o:label']) ? null : $value['o:label'];
-                    $value = $id ?? $label ?? reset($value);
-                }
-                $id = $this->bulk->getResourceTemplateId($value);
-                if ($id) {
-                    $resource['o:resource_template'] = empty($label)
-                        ? ['o:id' => $id]
-                        : ['o:id' => $id, 'o:label' => $label];
-                } else {
-                    $resource['o:resource_template'] = null;
-                    $resource['messageStore']->addError('values', new PsrMessage(
-                        'The resource template "{source}" does not exist.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return $this;
+        if (is_numeric($resource['o:id'])) {
+            $resource['o:id'] = ((int) $resource['o:id']) ?: null;
+        }
 
-            case 'o:resource_class':
-                if (is_array($value)) {
-                    $id = empty($value['o:id']) ? null : $value['o:id'];
-                    $term = empty($value['o:term']) ? null : $value['o:term'];
-                    $value = $id ?? $term ?? reset($value);
-                }
-                $id = $this->bulk->getResourceClassId($value);
-                if ($id) {
-                    $resource['o:resource_class'] = empty($term)
-                        ? ['o:id' => $id]
-                        : ['o:id' => $id, 'o:term' => $term];
-                } else {
-                    $resource['o:resource_class'] = null;
-                    $resource['messageStore']->addError('values', new PsrMessage(
-                        'The resource class "{source}" does not exist.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return $this;
+        if (empty($resource['o:id'])) {
+            $resource['o:id'] = null;
+            return $this;
+        }
 
-            case 'o:thumbnail':
-                if (is_array($value)) {
-                    $id = empty($value['o:id']) ? null : $value['o:id'];
-                    $url = empty($value['ingest_url']) ? null : $value['ingest_url'];
-                    $altText = empty($value['o:alt_text']) ? null : $value['o:alt_text'];
-                    $value = $id ?? $url ?? null;
-                }
-                if (is_numeric($value)) {
-                    $id = $this->bulk->getAssetId($value);
-                } elseif (is_string($value)) {
-                    // TODO Temporary creation of the asset.
-                    $asset = $this->createAssetFromUrl($value, $resource['messageStore']);
-                    $id = $asset ? $asset->getId() : null;
-                }
-                if ($id) {
-                    $resource['o:thumbnail'] = empty($altText)
-                        ? ['o:id' => $id]
-                        // TODO Check if the alt text is updated.
-                        : ['o:id' => $id, 'o:alt_text' => $altText];
-                } else {
-                    $resource['messageStore']->addError('values', new PsrMessage(
-                        'The thumbnail "{source}" does not exist or cannot be created.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return $this;
+        // Validate the main id/identifier early.
+        $resourceName = $resource['resource_name'] ?? null;
 
-            case 'o:owner':
+        $id = $this->bulkIdentifiers->getIdFromIndex($resource['source_index']);
+        if ($id) {
+            $resource['o:id'] = $id;
+        } else {
+            // TODO Use a generic method.
+            $resource['o:id'] = in_array($resourceName, [null, 'items', 'media', 'item_sets', 'value_annotations', 'annotations'])
+                ? $this->bulkIdentifiers->findResourceFromIdentifier($resource['o:id'], 'o:id', $resourceName, $resource['messageStore'])
+                : $this->api->searchOne($resourceName, ['id' => $resource['o:id']], ['returnScalar' => 'id'])->getContent();
+        }
+
+        if ($resource['o:id']) {
+            $resource['checked_id'] = true;
+        } else {
+            $resource['o:id'] = null;
+            $resource['messageStore']->addError('resource', new PsrMessage(
+                'source index #{index}: Internal id cannot be found. The entry is skipped.', // @translate
+                ['index' => $resource['source_index']]
+            ));
+        }
+
+        return $this;
+    }
+
+    protected function fillResourceSingleEntities(ArrayObject $resource, array $data): self
+    {
+        // Entities are not processed in the meta mapper, neither by the
+        // processor above, so it is always an array of strings or arrays
+        // to copy from data into resource.
+
+        $currentFieldTypes = empty($resource['resource_name']) || $resource['resource_name'] === $this->resourceName
+            ? $this->fieldTypes
+            : $this->getFieldTypesForResource($resource['resource_name']);
+
+        // Owner is prefilled in base entity. This is a single entity.
+        // TODO Use $this->getFieldTypesForResource().
+        if ((isset($currentFieldTypes['o:owner']) || isset($currentFieldTypes['o:email']))
+            && (array_key_exists('o:owner', $data) || array_key_exists('o:email', $data))
+        ) {
+            $values = array_merge(array_values($data['o:owner'] ?? []), array_values($data['o:email'] ?? []));
+            foreach (array_filter($values) as $value) {
+                // Get the entity id.
                 if (is_array($value)) {
                     $id = empty($value['o:id']) ? null : $value['o:id'];
                     $email = empty($value['o:email']) ? null : $value['o:email'];
                     $value = $id ?? $email ?? reset($value);
                 }
-                $id = $this->bulk->getUserId($value);
+                $id = $this->bulkIdentifiers->getUserId($value);
                 if ($id) {
                     $resource['o:owner'] = empty($email)
                         ? ['o:id' => $id]
                         : ['o:id' => $id, 'o:email' => $email];
                 } else {
-                    $resource['o:owner'] = null;
+                    $resource['o:owner'] = $resource['o:owner'] ?? null;
                     $resource['messageStore']->addError('resource', new PsrMessage(
                         'The user "{source}" does not exist.', // @translate
                         ['source' => $value]
                     ));
                 }
-                return $this;
-
-            case 'o:item':
-                // For media.
-                if (is_array($value)) {
-                    $id = empty($value['o:id']) ? null : $value['o:id'];
-                    $value = $id ?? reset($value);
-                }
-                $id = $this->identifiers['mapx'][$resource['source_index']]
-                    ?? $this->bulk->findResourceFromIdentifier($value, null, null, $resource['messageStore']);
-                if ($id) {
-                    $resource['o:item'] = ['o:id' => $id];
-                } else {
-                    $resource['o:item'] = null;
-                    $resource['messageStore']->addError('resource', new PsrMessage(
-                        'The item "{source}" for media does not exist.', // @translate
-                        ['source' => $value]
-                    ));
-                }
-                return $this;
-
-            default:
-                return $this;
+            }
         }
+
+        return $this;
+    }
+
+    protected function fillResourceSpecific(ArrayObject $resource, array $data): self
+    {
+        return $this;
+    }
+
+    public function checkResource(array $resource): array
+    {
+        $this->indexResource = $resource['source_index'];
+        $resourceObject = new ArrayObject($resource);
+        $resourceObject['messageStore'] = $resource['messageStore'] ?? new MessageStore();
+        $this->checkEntity($resourceObject);
+        return $resourceObject->getArrayCopy();
     }
 
     /**
      * Check if a resource is well-formed.
+     *
+     * @todo Replace by checkResource() directly, but manage ResourceProcessor.
      */
     protected function checkEntity(ArrayObject $resource): bool
     {
@@ -1520,44 +598,266 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
             $this->fillId($resource);
         }
 
+        $listIdentifiers = function (ArrayObject $resource): array {
+            // To simplify check of source, log all identifiers when
+            // possible and append common identifiers and titles.
+            $identifiers = $this->extractIdentifiersAll($resource);
+            $identifierCommon = $this->extractIdentifierCommon($resource);
+            if ($identifierCommon) {
+                $identifiers['identifier'][] = $identifierCommon;
+            }
+            $identifierTitle = $this->extractIdentifierTitle($resource);
+            if ($identifierTitle) {
+                $identifiers['title'][] = $identifierTitle;
+            }
+            return $identifiers;
+        };
+
         if ($resource['o:id']) {
             if (!$this->actionRequiresId()) {
-                if ($this->bulk->getAllowDuplicateIdentifiers()) {
+                if ($this->allowDuplicateIdentifiers) {
                     // Action is create or skip.
+                    // TODO This feature is not clear: disallow the action create when o:id is set in the source (allow only a found identifier).
                     if ($this->action === self::ACTION_CREATE) {
                         unset($resource['o:id']);
                     }
                 } else {
-                    $identifier = $this->extractIdentifierOrTitle($resource);
-                    if ($this->action === self::ACTION_CREATE) {
+                    $identifiers = $listIdentifiers($resource);
+                    $resourceNameLabel = $this->easyMeta->resourceLabel($resource['resource_name']);
+                    if (!$identifiers) {
                         $resource['messageStore']->addError('resource', new PsrMessage(
-                            'The action "{action}" cannot have an id or a duplicate identifier ({identifier}, #{resource_id}).', // @translate
-                            ['action' => $this->action, 'identifier' => $identifier, 'resource_id' => $resource['o:id']]
+                            'The action "{action}" requires an identifier ({resource_name} #{resource_id}).', // @translate
+                            ['action' => $this->action, 'resource_name' => $resourceNameLabel, 'resource_id' => $resource['o:id']]
+                        ));
+                    } elseif ($this->action === self::ACTION_CREATE) {
+                        $resource['messageStore']->addError('resource', new PsrMessage(
+                            'The action "{action}" cannot have an id or a duplicate identifier ({resource_name} #{resource_id}): {json}', // @translate
+                            ['action' => $this->action, 'resource_name' => $resourceNameLabel, 'resource_id' => $resource['o:id'], 'json' => $identifiers]
                         ));
                     } else {
                         $resource['messageStore']->addError('resource', new PsrMessage(
-                            'The action "{action}" requires a unique identifier ({identifier}, #{resource_id}).', // @translate
-                            ['action' => $this->action, 'identifier' => $identifier, 'resource_id' => $resource['o:id']]
+                            'The action "{action}" requires a unique identifier ({resource_name} #{resource_id}): {json}', // @translate
+                            ['action' => $this->action, 'resource_name' => $resourceNameLabel, 'resource_id' => $resource['o:id'], 'json' => $identifiers]
                         ));
                     }
                 }
             }
         }
-        // No resource id, so it is an error, so add message if choice is skip.
-        elseif ($this->actionRequiresId() && $this->actionUnidentified === self::ACTION_SKIP) {
-            $identifier = $this->extractIdentifierOrTitle($resource);
-            if ($this->bulk->getAllowDuplicateIdentifiers()) {
-                $resource['messageStore']->addError('identifier', new PsrMessage(
-                    'The action "{action}" requires an identifier ({identifier}).', // @translate
-                    ['action' => $this->action, 'identifier' => $identifier]
-                ));
+        // No resource id but the action requires one. If the option for
+        // undefined id is to create new resources, it is normal. If the option
+        // is to skip the current line, add a warning, else an error.
+        elseif ($this->actionRequiresId()
+            && in_array($this->actionUnidentified, [self::ACTION_ERROR, self::ACTION_SKIP])
+        ) {
+            $identifiers = $listIdentifiers($resource);
+            $logLevel = $this->actionUnidentified === self::ACTION_SKIP ? \Laminas\Log\Logger::WARN: \Laminas\Log\Logger::ERR;
+            if (!$identifiers) {
+                $resource['messageStore']->addMessage('identifier', new PsrMessage(
+                    'The action "{action}" requires an identifier.', // @translate
+                    ['action' => $this->action]
+                ), $logLevel);
+            } elseif ($this->allowDuplicateIdentifiers) {
+                $resource['messageStore']->addMessage('identifier', new PsrMessage(
+                    'The action "{action}" requires an identifier: {json}', // @translate
+                    ['action' => $this->action, 'json' => $identifiers]
+                ), $logLevel);
             } else {
-                $resource['messageStore']->addError('identifier', new PsrMessage(
-                    'The action "{action}" requires a unique identifier ({identifier}).', // @translate
-                    ['action' => $this->action, 'identifier' => $identifier]
-                ));
+                $resource['messageStore']->addMessage('identifier', new PsrMessage(
+                    'The action "{action}" requires a unique identifier: {json}', // @translate
+                    ['action' => $this->action, 'json' => $identifiers]
+                ), $logLevel);
             }
         }
+
+        $this->checkEntitySpecific($resource);
+
+        // Hydration check may be heavy, so check it only wen there are not
+        // issue.
+        if ($resource['messageStore']->hasErrors()) {
+            return false;
+        }
+
+        $this->checkEntityViaHydration($resource);
+
+        return !$resource['messageStore']->hasErrors();
+    }
+
+    protected function checkEntitySpecific(ArrayObject $resource): bool
+    {
+        return true;
+    }
+
+    protected function checkEntityViaHydration(ArrayObject $resource): bool
+    {
+        // Don't do more checks for skip.
+        $operation = $this->standardOperation($this->action);
+        if (!$operation) {
+            return !$resource['messageStore']->hasErrors();
+        }
+
+        /** @see \Omeka\Api\Manager::execute() */
+        if (!$this->checkAdapter($resource['resource_name'], $operation)) {
+            $resource['messageStore']->addError('rights', new PsrMessage(
+                'User has no rights to "{action}" {resource_name}.', // @translate
+                ['action' => $operation, 'resource_name' => $this->easyMeta->resourceLabel($resource['resource_name'])]
+            ));
+            return false;
+        }
+
+        // Check through hydration and standard api.
+        /** @var \Omeka\Api\Adapter\AbstractResourceEntityAdapter $adapter */
+        $adapter = $this->adapterManager->get($resource['resource_name']);
+
+        // Some options are useless here, but added anyway.
+        /** @see \Omeka\Api\Request::setOption() */
+        $requestOptions = [
+            'continueOnError' => true,
+            'flushEntityManager' => false,
+            'responseContent' => 'resource',
+        ];
+
+        $request = new Request($operation, $resource['resource_name']);
+        $request
+            ->setContent($resource->getArrayCopy())
+            ->setOption($requestOptions);
+
+        if (empty($resource['o:id'])
+            && $operation !== Request::CREATE
+            && $this->actionUnidentified === self::ACTION_SKIP
+        ) {
+            return true;
+        } elseif ($operation === Request::CREATE
+            || (empty($resource['o:id']) && $this->actionUnidentified === self::ACTION_CREATE)
+        ) {
+            $entityClass = $adapter->getEntityClass();
+            $entity = new $entityClass;
+            // TODO This exception should be managed in resource or item processor.
+            if ($resource['resource_name'] === 'media') {
+                $entityItem = null;
+                // Already checked, except when a source identifier is used.
+                if (empty($resource['o:item']['o:id'])) {
+                    if (!empty($resource['o:item']['source_identifier']) && !empty($resource['o:item']['checked_id'])) {
+                        $entityItem = new \Omeka\Entity\Item;
+                    }
+                } else {
+                    try {
+                        $entityItem = $adapter->getAdapter('items')->findEntity($resource['o:item']['o:id']);
+                    } catch (\Exception $e) {
+                        // Managed below.
+                    }
+                }
+                if (!$entityItem) {
+                    $resource['messageStore']->addError('media', new PsrMessage(
+                        'Media must belong to an item.' // @translate
+                    ));
+                    return false;
+                }
+                $entity->setItem($entityItem);
+                $entity->setIngester($resource['o:ingester'] ?? null);
+            } elseif ($resource['resource_name'] === 'assets') {
+                $entity->setName($resource['o:name'] ?? '');
+            }
+        } else {
+            $request
+                ->setId($resource['o:id']);
+
+            $entity = $adapter->findEntity($resource['o:id']);
+            // \Omeka\Api\Adapter\AbstractEntityAdapter::authorize() is protected.
+            if (!$this->acl->userIsAllowed($entity, $operation)) {
+                $resource['messageStore']->addError('rights', new PsrMessage(
+                    'User has no rights to "{action}" {resource_name} {resource_id}.', // @translate
+                    ['action' => $operation, 'resource_name' => $this->easyMeta->resourceLabel($resource['resource_name']), 'resource_id' => $resource['o:id']]
+                ));
+                return false;
+            }
+
+            // For deletion, just check rights.
+            if ($operation === Request::DELETE) {
+                return !$resource['messageStore']->hasErrors();
+            }
+        }
+
+        // Complete from api modules (api.execute/create/update.pre).
+        /** @see \Omeka\Api\Manager::initialize() */
+        try {
+            $this->api->initialize($adapter, $request);
+        } catch (\Exception $e) {
+            $resource['messageStore']->addError('modules', new PsrMessage(
+                'Initialization exception: {exception}', // @translate
+                ['exception' => $e]
+            ));
+            return false;
+        }
+
+        // Check new files for assets, items and media before hydration to speed
+        // process, because files are checked during hydration too, but with a
+        // full download.
+        $this->checkNewFiles($resource);
+
+        // Some files may have been removed.
+        if ($this->skipMissingFiles) {
+            $request
+                ->setContent($resource->getArrayCopy());
+        }
+
+        // The entity is checked here to store error when there is a file issue.
+        $errorStore = new \Omeka\Stdlib\ErrorStore;
+        $adapter->validateRequest($request, $errorStore);
+        $adapter->validateEntity($entity, $errorStore);
+
+        // TODO Process hydration checks except files or use an event to check files differently during hydration or store loaded url in order to get all results one time.
+        // TODO In that case, check iiif image or other media that may have a file or url too.
+
+        if ($resource['messageStore']->hasErrors() || $errorStore->hasErrors()) {
+            $resource['messageStore']->mergeErrors($errorStore);
+            return false;
+        }
+
+        // TODO Check the file for asset.
+        if ($resource['resource_name'] === 'assets') {
+            return !$resource['messageStore']->hasErrors();
+        }
+
+        // Don't check new files twice. Furthermore, the media are pre-hydrated
+        // and a flush somewhere may duplicate the item.
+        // TODO Use a second entity manager.
+        /*
+        $isItem = $resource['resource_name'] === 'items';
+        if ($isItem) {
+            $res = $request->getContent();
+            unset($res['o:media']);
+            $request->setContent($res);
+        }
+         */
+
+        // Process hydration checks for remaining checks, in particular media.
+        // This is the same operation than api create/update, but without
+        // persisting entity.
+        // Normally, all data are already checked, except actual medias.
+        $errorStore = new \Omeka\Stdlib\ErrorStore;
+        try {
+            $adapter->hydrateEntity($request, $entity, $errorStore);
+        } catch (\Exception $e) {
+            $resource['messageStore']->addError('validation', new PsrMessage(
+                'Validation exception: {exception}', // @translate
+                ['exception' => $e]
+            ));
+            return false;
+        }
+
+        // Remove pre-hydrated entities from entity manager: it was only checks.
+        // TODO Ideally, checks should be done on a different entity manager, so modify service before and after.
+        /** @var \Doctrine\ORM\EntityManager $entityManager */
+        $entityManager = $this->getServiceLocator()->get('Omeka\EntityManager');
+        $entityManager->clear();
+
+        // Merge error store with resource message store.
+        $resource['messageStore']->mergeErrors($errorStore, 'validation');
+        if ($resource['messageStore']->hasErrors()) {
+            return false;
+        }
+
+        // TODO Check finalize (post) api process. Note: some modules flush results.
 
         return !$resource['messageStore']->hasErrors();
     }
@@ -1565,86 +865,321 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
     /**
      * Check if new files (local system and urls) are available and allowed.
      *
+     * Just warn when a file is missing with mode "skip missing files" (only for
+     * items with medias, not media alone or assets).
+     *
      * By construction, it's not possible to check or modify existing files.
      */
     protected function checkNewFiles(ArrayObject $resource): bool
     {
-        if (!in_array($resource['resource_name'], ['items', 'media'])) {
+        if (!in_array($resource['resource_name'], ['items', 'media', 'assets'])) {
             return true;
         }
 
-        if ($resource['resource_name'] === 'media') {
-            $medias = [$resource];
-        } else {
-            $medias = $resource['o:media'] ?? [];
-            if (!$medias) {
+        $isItem = $resource['resource_name'] === 'items';
+        if ($isItem) {
+            $resourceFiles = $resource['o:media'] ?? [];
+            if (!$resourceFiles) {
                 return true;
+            }
+        } else {
+            $resourceFiles = [$resource];
+        }
+
+        if ($isItem && $this->skipMissingFiles) {
+            return $this->checkItemFilesWarn($resource, $resourceFiles);
+        }
+
+        $isAsset = $resource['resource_name'] === 'assets';
+
+        foreach ($resourceFiles as $resourceFile) {
+            // A file cannot be updated.
+            if (!empty($resourceFile['o:id'])) {
+                continue;
+            }
+            $this->bulkFile->setIsAsset($isAsset);
+            if (!empty($resourceFile['ingest_url'])) {
+                $this->bulkFile->checkUrl($resourceFile['ingest_url'], $resource['messageStore']);
+            } elseif (!empty($resourceFile['ingest_filename'])) {
+                $this->bulkFile->checkFile($resourceFile['ingest_filename'], $resource['messageStore']);
+            } elseif (!empty($resourceFile['ingest_directory'])) {
+                $this->bulkFile->checkDirectory($resourceFile['ingest_directory'], $resource['messageStore']);
+            } else {
+                // Add a warning: cannot be checked for other media ingester? Or is it checked somewhere else?
             }
         }
 
-        foreach ($medias as $media) {
-            if (!empty($media['o:id'])) {
+         return !$resource['messageStore']->hasErrors();
+    }
+
+    /**
+     * Warn if new files (local system and urls) are available and allowed.
+     *
+     * By construction, it's not possible to check or modify existing files.
+     * So this method is only for items.
+     */
+    protected function checkItemFilesWarn(ArrayObject $resource): bool
+    {
+        // This array allows to skip check when the same file is imported
+        // multiple times, in particular during tests of an import.
+        static $missingFiles = [];
+
+        $resource['messageStore']->setStoreNewErrorAsWarning(true);
+
+        $ingestData = [
+            'ingest_url' => [
+                'method' => 'checkUrl',
+                'message_msg' => 'Cannot fetch url "{url}". The url is skipped.', // @translate
+                'message_key' => 'url',
+            ],
+            'ingest_filename' => [
+                'method' => 'checkFile',
+                'message_msg' => 'Cannot fetch file "{file}". The file is skipped.', // @translate
+                'message_key' => 'file',
+            ],
+            'ingest_directory' => [
+                'method' => 'checkDirectory',
+                'message_msg' => 'Cannot fetch directory "{file}". The file is skipped.', // @translate
+                'message_key' => 'file',
+            ],
+        ];
+
+        $resourceFiles = $resource['o:media'];
+        foreach ($resourceFiles as $key => $resourceFile) {
+            // A file cannot be updated.
+            if (!empty($resourceFile['o:id'])) {
                 continue;
             }
-            if (!empty($media['ingest_url'])) {
-                $this->checkUrl($media['ingest_url'], $resource['messageStore']);
-            } elseif (!empty($media['ingest_filename'])) {
-                $this->checkFile($media['ingest_filename'], $resource['messageStore']);
-            } elseif (!empty($media['ingest_directory'])) {
-                $this->checkDirectory($media['ingest_directory'], $resource['messageStore']);
-            } else {
+
+            $ingestSourceKey = !empty($resourceFile['ingest_url'])
+                ? 'ingest_url'
+                : (!empty($resourceFile['ingest_filename'])
+                    ? 'ingest_filename'
+                    : (!empty($resourceFile['ingest_directory'])
+                        ? 'ingest_directory'
+                        : null));
+            if (!$ingestSourceKey) {
                 // Add a warning: cannot be checked for other media ingester? Or is it checked somewhere else?
                 continue;
             }
+
+            // Method is "checkFile", "checkUrl" or "checkDirectory".
+            $ingestSource = $resourceFile[$ingestSourceKey];
+            $method = $ingestData[$ingestSourceKey]['method'];
+            $messageMsg = $ingestData[$ingestSourceKey]['message_msg'];
+            $messageKey = $ingestData[$ingestSourceKey]['message_key'];
+
+            if (isset($missingFiles[$ingestSourceKey][$ingestSource])) {
+                $resource['messageStore']->addWarning($messageKey, new PsrMessage($messageMsg, [$messageKey => $ingestSource]));
+            } else {
+                $result = $this->bulkFile->$method($ingestSource, $resource['messageStore']);
+                if (!$result) {
+                    $missingFiles[$ingestSourceKey][$ingestSource] = true;
+                }
+            }
+            if (isset($missingFiles[$ingestSourceKey][$ingestSource])) {
+                unset($resource['o:media'][$key]);
+            }
         }
+
+        $resource['messageStore']->setStoreNewErrorAsWarning(false);
 
         return !$resource['messageStore']->hasErrors();
     }
 
     /**
-     * Process entities.
+     * Check if a resource has a id and mark "checked_id" as true in all cases.
+     *
+     * The action should be checked separately, else the result may have no
+     * meaning.
+     *
+     * @todo Clarify the key "checked_id" when there is no id.
      */
-    protected function processEntities(array $dataResources): \BulkImport\Processor\Processor
+    protected function checkId(ArrayObject $resource): bool
     {
+        if (!empty($resource['checked_id'])) {
+            return !empty($resource['o:id']);
+        }
+
+        // The id is set, but not checked. So check it.
+        // TODO Check if the resource name is the good one.
+        if ($resource['o:id']) {
+            $resourceName = $resource['resource_name'] ?: $this->getResourceName();
+            $resource['messageStore'] = $resource['messageStore'] ?? new MessageStore();
+            if (empty($resourceName)) {
+                $resource['messageStore']->addError('resource_name', new PsrMessage(
+                    'The resource id #{id} cannot be checked: the resource type is undefined.', // @translate
+                    ['id' => $resource['o:id']]
+                ));
+            } elseif ($resourceName === 'resources') {
+                $resource['messageStore']->addError('resource_name', new PsrMessage(
+                    'The resource id #{id} cannot be checked: the resource type is unspecified.', // @translate
+                    ['id' => $resource['o:id']]
+                ));
+            } else {
+                $resourceId = $resourceName === 'assets'
+                    ? $this->bulkIdentifiers->findAssetsFromIdentifiers($resource['o:id'], 'o:id')
+                    : $this->bulkIdentifiers->findResourceFromIdentifier($resource['o:id'], 'o:id', $resourceName, $resource['messageStore'] ?? null);
+                if (!$resourceId) {
+                    $resource['messageStore']->addError('resource_id', new PsrMessage(
+                        'The id #{id} of this resource doesn’t exist.', // @translate
+                        ['id' => $resource['o:id']]
+                    ));
+                }
+            }
+        }
+
+        $resource['checked_id'] = true;
+        return !empty($resource['o:id']);
+    }
+
+    /**
+     * Fill id of resource if not set. No check if set, so use checkId() first.
+     *
+     * The resource type is required, so this method should be used in the end
+     * of the process.
+     *
+     * @return bool True if id is set.
+     */
+    protected function fillId(ArrayObject $resource): bool
+    {
+        if (is_numeric($resource['o:id'])) {
+            return true;
+        }
+
+        $resource['messageStore'] = $resource['messageStore'] ?? new MessageStore();
+
+        // TODO getResourceName() is only in child AbstractResourceProcessor.
+        $resourceName = empty($resource['resource_name'])
+            ? $this->getResourceName()
+            : $resource['resource_name'];
+        if (empty($resourceName)) {
+            $resource['messageStore']->addError('resource_name', new PsrMessage(
+                'The resource id cannot be filled: the resource type is undefined.' // @translate
+            ));
+        } elseif ($resourceName === 'resources') {
+            $resource['messageStore']->addError('resource_name', new PsrMessage(
+                'The resource id cannot be filled: the resource type is unspecified.' // @translate
+            ));
+        }
+
+        $idNames = $this->identifierNames;
+        $key = array_search('o:id', $idNames);
+        if ($key !== false) {
+            unset($idNames[$key]);
+        }
+        if (empty($idNames) && !$this->actionRequiresId()) {
+            return false;
+        }
+
+        if (empty($idNames)) {
+            if ($this->allowDuplicateIdentifiers) {
+                $resource['messageStore']->addWarning('identifier', new PsrMessage(
+                    'The resource has no identifier. You may check the identifier names set in import form or check if the resource type is the right one.' // @translate
+                ));
+            } else {
+                $resource['messageStore']->addError('identifier', new PsrMessage(
+                    'The resource id cannot be filled: no metadata defined as identifier and duplicate identifiers are not allowed. You may check the identifier names set in import form or check if the resource type is the right one.' // @translate
+                ));
+            }
+            return false;
+        }
+
+        // Don't try to fill id when resource has an error, but allow warnings.
+        if ($resource['messageStore']->hasErrors()) {
+            return false;
+        }
+
+        foreach (array_keys($idNames) as $identifierName) {
+            // Get the list of identifiers from the resource metadata.
+            $identifiers = [];
+            if (!empty($resource[$identifierName])) {
+                // Check if it is a property value.
+                if (is_array($resource[$identifierName])) {
+                    foreach ($resource[$identifierName] as $value) {
+                        if (is_array($value)) {
+                            // Check the different type of value. Only value is
+                            // managed currently.
+                            // TODO Check identifier that is not a property value.
+                            if (isset($value['@value']) && strlen($value['@value'])) {
+                                $identifiers[] = $value['@value'];
+                            }
+                        }
+                    }
+                } else {
+                    // TODO Check identifier that is not a property.
+                    $identifiers[] = $resource[$identifierName];
+                }
+            }
+
+            if (!$identifiers) {
+                continue;
+            }
+
+            $ids = $this->bulkIdentifiers->storeSourceIdentifiersIdsMore($identifiers, $identifierName, $resourceName, $resource);
+
+            if (!$ids) {
+                continue;
+            }
+
+            $flipped = array_flip($ids);
+            if (count($flipped) > 1) {
+                if ($this->allowDuplicateIdentifiers) {
+                    $resource['messageStore']->addWarning('identifier', new PsrMessage(
+                        'Resource doesn’t have a unique identifier. You may check options for resource identifiers.' // @translate
+                    ));
+                } else {
+                    $resource['messageStore']->addError('identifier', new PsrMessage(
+                        'Duplicate identifiers are not allowed. You may check options for resource identifiers.' // @translate
+                    ));
+                    break;
+                }
+            }
+
+            $resource['o:id'] = reset($ids);
+            $resource['checked_id'] = true;
+            return true;
+        }
+
+        return false;
+    }
+
+    public function processResource(array $resource): ?AbstractEntityRepresentation
+    {
+        // TODO Complete output with representation.
+
+        $this->indexResource = $resource['source_index'];
+        $resource['messageStore'] = $resource['messageStore'] ?? new MessageStore();
+
         switch ($this->action) {
+            case self::ACTION_SKIP:
+                $this->skipEntity($resource);
+                return null;
             case self::ACTION_CREATE:
-                $this->createEntities($dataResources);
-                break;
+                return $this->createEntity($resource);
             case self::ACTION_APPEND:
             case self::ACTION_REVISE:
             case self::ACTION_UPDATE:
             case self::ACTION_REPLACE:
-                $this->updateEntities($dataResources);
-                break;
-            case self::ACTION_SKIP:
-                $this->skipEntities($dataResources);
-                break;
+                return $this->updateEntity($resource);
             case self::ACTION_DELETE:
-                $this->deleteEntities($dataResources);
-                break;
+                $this->deleteEntity($resource);
+                return null;
+            default:
+                return null;
         }
-        return $this;
     }
 
     /**
-     * Process creation of entities.
+     * Do not process an entity.
      */
-    protected function createEntities(array $dataResources): \BulkImport\Processor\Processor
+    protected function skipEntity(array $resource): ?array
     {
-        $resourceName = $this->getResourceName();
-        $this->createResources($resourceName, $dataResources);
-        return $this;
+        return null;
     }
 
-    /**
-     * Process creation of resources.
-     */
-    protected function createResources($resourceName, array $dataResources): \BulkImport\Processor\Processor
+    protected function createEntity(array $resource): ?AbstractEntityRepresentation
     {
-        if (!count($dataResources)) {
-            return $this;
-        }
-
         // Linked ids from identifiers may be missing in data. So two solutions
         // to add missing ids: create resources one by one and add ids here, or
         // batch create and use an event to fill add ids.
@@ -1656,83 +1191,80 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
         // So act as a loop.
         // Anyway, in most of the cases, the loop contains only one resource.
 
-        $resources = [];
-        foreach ($dataResources as $dataResource) {
-            $dataResource = $this->completeResourceIdentifierIds($dataResource);
-            try {
-                $response = $this->bulk->api(null, true)
-                    ->create($resourceName, $dataResource);
-            } catch (ValidationException $e) {
-                $r = $this->baseEntity();
-                $r['messageStore']->addError('resource', new PsrMessage(
-                    'Error during validation of the data before creation.' // @translate
-                ));
-                $messages = $this->listValidationMessages($e);
-                $r['messageStore']->addError('resource', $messages);
-                $this->logCheckedResource($r);
-                ++$this->totalErrors;
-                return $this;
-            } catch (\Exception $e) {
-                $r = $this->baseEntity();
-                $r['messageStore']->addError('resource', new PsrMessage(
-                    'Core error during creation: {exception}', // @translate
-                    ['exception' => $e]
-                ));
-                $this->logCheckedResource($r);
-                ++$this->totalErrors;
-                return $this;
-            }
+        // And in fact, there is no more loop, but a single resource.
 
-            $resource = $response->getContent();
-            $resources[$resource->id()] = $resource;
-            $this->storeSourceIdentifiersIds($dataResource, $resource);
-            if ($resource->resourceName() === 'media') {
-                $this->logger->notice(
-                    'Index #{index}: Created media #{media_id} (item #{item_id})', // @translate
-                    ['index' => $this->indexResource, 'media_id' => $resource->id(), 'item_id' => $resource->item()->id()]
-                );
-            } else {
-                $this->logger->notice(
-                    'Index #{index}: Created {resource_name} #{resource_id}', // @translate
-                    ['index' => $this->indexResource, 'resource_name' => $this->bulk->label($resourceName), 'resource_id' => $resource->id()]
-                );
+        $defaultResourceName = $this->getResourceName();
+
+        // Manage mixed resources.
+        $resourceName = $resource['resource_name'] ?? $defaultResourceName;
+        $resource = $this->bulkIdentifiers->completeResourceIdentifierIds($resource);
+
+        // Remove uploaded files for items.
+        foreach ($resource['o:media'] ?? [] as &$media) {
+            if (($media['o:ingester'] ?? null )=== 'bulk' && ($media['ingest_ingester'] ?? null) === 'upload') {
+                $media['ingest_delete_file'] = true;
             }
         }
+        unset($media);
 
-        $this->recordCreatedResources($resources);
+        try {
+            $response = $this->bulk->api(null, true)
+                ->create($resourceName, $resource);
+        } catch (ValidationException $e) {
+            $resource['messageStore']->addError('resource', new PsrMessage(
+                'Error during validation of the data before creation.' // @translate
+            ));
+            $messages = $this->listValidationMessages($e);
+            $resource['messageStore']->addError('resource', $messages);
+            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
+            ++$this->totalErrors;
+            return null;
+        } catch (\Exception $e) {
+            $resource['messageStore']->addError('resource', new PsrMessage(
+                'Core error during creation: {exception}', // @translate
+                ['exception' => $e]
+            ));
+            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
+            ++$this->totalErrors;
+            return null;
+        }
 
-        return $this;
+        $representation = $response->getContent();
+        $this->bulkIdentifiers->storeSourceIdentifiersIds($resource, $representation);
+        if ($representation->resourceName() === 'media') {
+            $this->logger->notice(
+                'Index #{index}: Created media #{media_id} (item #{item_id})', // @translate
+                ['index' => $this->indexResource, 'media_id' => $representation->id(), 'item_id' => $representation->item()->id()]
+            );
+        } else {
+            $this->logger->notice(
+                'Index #{index}: Created {resource_name} #{resource_id}', // @translate
+                ['index' => $this->indexResource, 'resource_name' => $this->easyMeta->resourceLabel($resourceName), 'resource_id' => $representation->id()]
+            );
+        }
+
+        return $representation;
     }
 
     /**
-     * Process update of entities.
+     * Process update of entity.
      */
-    protected function updateEntities(array $dataResources): \BulkImport\Processor\Processor
+    protected function updateEntity(array $resource): ?AbstractEntityRepresentation
     {
-        $resourceName = $this->getResourceName();
+        $defaultResourceName = $this->getResourceName();
+        $resourceName = $resource['resource_name'] ?? $defaultResourceName;
 
-        $dataToCreateOrSkip = [];
-        foreach ($dataResources as $key => $value) {
-            if (empty($value['o:id'])) {
-                $dataToCreateOrSkip[] = $value;
-                unset($dataResources[$key]);
+        // Create resource if needed.
+        if (empty($resource['o:id'])) {
+            if ($this->actionUnidentified === self::ACTION_CREATE) {
+                return $this->createEntity($resource);
             }
-        }
-        if ($this->actionUnidentified === self::ACTION_CREATE) {
-            $this->createResources($resourceName, $dataToCreateOrSkip);
-        }
-
-        $this->updateResources($resourceName, $dataResources);
-        return $this;
-    }
-
-    /**
-     * Process update of resources.
-     */
-    protected function updateResources($resourceName, array $dataResources): \BulkImport\Processor\Processor
-    {
-        if (!count($dataResources)) {
-            return $this;
+            // Normally already checked.
+            $this->logger->warn(
+                'Index #{index}: The {resource_name} has no id and cannot be updated.', // @translate
+                ['index' => $this->indexResource, 'resource_name' => $this->easyMeta->resourceLabel($resourceName)]
+            );
+            return null;
         }
 
         // In the api manager, batchUpdate() allows to update a set of resources
@@ -1742,172 +1274,221 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
         // Clone is required to keep option to throw issue. The api plugin may
         // be used by other methods.
         $api = clone $this->bulk->api(null, true);
-        foreach ($dataResources as $dataResource) {
-            $options = [];
-            $fileData = [];
 
-            switch ($this->action) {
-                case self::ACTION_APPEND:
-                case self::ACTION_REPLACE:
-                    $options['isPartial'] = false;
-                    break;
-                case self::ACTION_REVISE:
-                case self::ACTION_UPDATE:
-                    $options['isPartial'] = true;
-                    $options['collectionAction'] = 'replace';
-                    break;
-                default:
-                    return $this;
-            }
-            $dataResource = $this->updateData($resourceName, $dataResource);
+        $options = [];
+        $fileData = [];
 
-            try {
-                $response = $api->update($resourceName, $dataResource['o:id'], $dataResource, $fileData, $options);
-            } catch (ValidationException $e) {
-                $r = $this->baseEntity();
-                $r['messageStore']->addError('resource', new PsrMessage(
-                    'Error during validation of the data before update.' // @translate
-                ));
-                $messages = $this->listValidationMessages($e);
-                $r['messageStore']->addError('resource', $messages);
-                $this->logCheckedResource($r);
-                ++$this->totalErrors;
-                return $this;
-            } catch (\Exception $e) {
-                $r = $this->baseEntity();
-                $r['messageStore']->addError('resource', new PsrMessage(
-                    'Core error during update: {exception}', // @translate
-                    ['exception' => $e]
-                ));
-                $this->logCheckedResource($r);
-                ++$this->totalErrors;
-                return $this;
-            }
-            if (!$response) {
-                $r = $this->baseEntity();
-                $r['messageStore']->addError('resource', new PsrMessage(
-                    'Unknown error occured during update.' // @translate
-                ));
-                ++$this->totalErrors;
-                return $this;
-            }
-            $this->logger->notice(
-                'Index #{index}: Updated {resource_name} #{resource_id}', // @translate
-                ['index' => $this->indexResource, 'resource_name' => $this->bulk->label($resourceName), 'resource_id' => $dataResource['o:id']]
-            );
-        }
-
-        return $this;
-    }
-
-    /**
-     * Process deletion of entities.
-     */
-    protected function deleteEntities(array $dataResources): \BulkImport\Processor\Processor
-    {
-        $resourceName = $this->getResourceName();
-        $this->deleteResources($resourceName, $dataResources);
-        return $this;
-    }
-
-    /**
-     * Process deletion of resources.
-     */
-    protected function deleteResources($resourceName, array $dataResources): \BulkImport\Processor\Processor
-    {
-        if (!count($dataResources)) {
+        // The "resources" cannot be updated directly.
+        // Normally already checked.
+        if (!$resourceName || $resourceName === 'resources') {
+            $resource['messageStore']->addError('resource', new PsrMessage(
+                'The resource id #"{id}" has no resource name.', // @translate
+                ['id' => $resource['o:id']]
+            ));
+            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
+            ++$this->totalErrors;
             return $this;
         }
 
-        // Get ids (already checked normally).
-        $ids = [];
-        foreach ($dataResources as $dataResource) {
-            if (isset($dataResource['o:id'])) {
-                $ids[] = $dataResource['o:id'];
+        switch ($this->action) {
+            case self::ACTION_APPEND:
+            case self::ACTION_REPLACE:
+                $options['isPartial'] = false;
+                break;
+            case self::ACTION_REVISE:
+            case self::ACTION_UPDATE:
+            case self::ACTION_SUB_UPDATE:
+                $options['isPartial'] = true;
+                $options['collectionAction'] = 'replace';
+                break;
+            default:
+                return null;
+        }
+
+        if ($this->action !== self::ACTION_SUB_UPDATE) {
+            $updatedResource = $resourceName === 'assets'
+                ? $this->updateDataAsset($resource)
+                : $this->updateResource->__invoke($resource, [
+                    'action' => $this->action,
+                    // In ResourceProcessor.
+                    'actionItemSet' => $this->actionItemSet,
+                    'actionMedia' => $this->actionMedia,
+                    'actionIdentifier' => $this->actionIdentifier,
+                    'identifierNames' => $this->identifierNames,
+                    'metaMapping' => $this->metaMapper->getMetaMapping(),
+                ]);
+            if (!$updatedResource
+                || (isset($updatedResource['messageStore']) && $updatedResource['messageStore']->hasErrors())
+            ) {
+                ++$this->totalErrors;
+                return null;
             }
+            $resource = $updatedResource;
+        }
+
+        // Remove uploaded files.
+        foreach ($resource['o:media'] ?? [] as &$media) {
+            if (($media['o:ingester'] ?? null )=== 'bulk' && ($media['ingest_ingester'] ?? null) === 'upload') {
+                $media['ingest_delete_file'] = true;
+            }
+        }
+        unset($media);
+
+        try {
+            $response = $api->update($resourceName, $resource['o:id'], $resource, $fileData, $options);
+        } catch (ValidationException $e) {
+            $resource['messageStore']->addError('resource', new PsrMessage(
+                'Error during validation of the data before update.' // @translate
+            ));
+            $messages = $this->listValidationMessages($e);
+            $resource['messageStore']->addError('resource', $messages);
+            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
+            ++$this->totalErrors;
+            return null;
+        } catch (\Exception $e) {
+            $resource['messageStore']->addError('resource', new PsrMessage(
+                'Core error during update: {exception}', // @translate
+                ['exception' => $e]
+            ));
+            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
+            ++$this->totalErrors;
+            return null;
+        }
+
+        if (!$response) {
+            $resource['messageStore']->addError('resource', new PsrMessage(
+                'Unknown error occured during update.' // @translate
+            ));
+            ++$this->totalErrors;
+            return null;
+        }
+
+        $representation = $response->getContent();
+
+        if ($resourceName === 'assets') {
+            $this->updateThumbnailForResources($resource);
+            return $representation;
+        }
+
+        $this->logger->notice(
+            'Index #{index}: Updated {resource_name} #{resource_id}', // @translate
+            ['index' => $this->indexResource, 'resource_name' => $this->easyMeta->resourceLabel($resourceName), 'resource_id' => $resource['o:id']]
+        );
+
+        return $representation;
+    }
+
+    /**
+     * Process deletion of an entity.
+     */
+    protected function deleteEntity(array $resource): ?AbstractEntityRepresentation
+    {
+        $resourceName = $resource['resource_name'] ?? 'resources';
+        $id = $resource['o:id'];
+
+        if (!$id) {
+            // Normally already checked.
+            $this->logger->warn(
+                'Index #{index}: The {resource_name} has no id and cannot be deleted.', // @translate
+                ['index' => $this->indexResource, 'resource_name' => $this->easyMeta->resourceLabel($resourceName)]
+            );
+            return null;
         }
 
         try {
-            if (count($ids) === 1) {
-                $this->bulk->api(null, true)
-                    ->delete($resourceName, reset($ids))->getContent();
-            } else {
-                $this->bulk->api(null, true)
-                    ->batchDelete($resourceName, $ids, [], ['continueOnError' => true])->getContent();
-            }
+            $this->bulk->api(null, true)
+                ->delete($resourceName, $id)->getContent();
         } catch (ValidationException $e) {
-            $r = $this->baseEntity();
-            $r['messageStore']->addError('resource', new PsrMessage(
+            $resource['messageStore']->addError('resource', new PsrMessage(
                 'Error during validation of the data before deletion.' // @translate
             ));
             $messages = $this->listValidationMessages($e);
-            $r['messageStore']->addError('resource', $messages);
-            $this->logCheckedResource($r);
+            $resource['messageStore']->addError('resource', $messages);
+            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
             ++$this->totalErrors;
-            return $this;
+            return null;
         } catch (\Exception $e) {
-            $r = $this->baseEntity();
-            // There is no error, only ids already deleted, so continue.
-            $r['messageStore']->addWarning('resource', new PsrMessage(
+            // There is no error, only id already deleted, so continue.
+            $resource['messageStore']->addWarning('resource', new PsrMessage(
                 'Core error during deletion: {exception}', // @translate
                 ['exception' => $e]
             ));
-            $this->logCheckedResource($r);
+            $this->bulkCheckLog->logCheckedResource($this->indexResource, $resource);
             ++$this->totalErrors;
-            return $this;
+            return null;
         }
 
-        foreach ($ids as $id) {
-            $this->logger->notice(
-                'Index #{index}: Deleted {resource_name} #{resource_id}', // @translate
-                ['index' => $this->indexResource, 'resource_name' => $this->bulk->label($resourceName), 'resource_id' => $id]
-            );
+        $this->logger->notice(
+            'Index #{index}: Deleted {resource_name} #{resource_id}', // @translate
+            ['index' => $this->indexResource, 'resource_name' => $this->easyMeta->resourceLabel($resourceName), 'resource_id' => $id]
+        );
+        return null;
+    }
+
+    protected function extractIdentifiersAll(ArrayObject $resource): array
+    {
+        $result = [];
+        foreach ($this->identifierNames as $identifierName) {
+            if (empty($resource[$identifierName])) {
+                continue;
+            }
+            if ($identifierName === 'o:display_title') {
+                if (!empty($resource['o:display_title'])) {
+                    $result[$identifierName][] = (string) $resource['o:display_title'];
+                }
+            } elseif ($this->easyMeta->propertyId($identifierName)) {
+                foreach ($resource[$identifierName] as $value) {
+                    if (!empty($value['@value'])) {
+                        $result[$identifierName][] = (string) $value['@value'];
+                    }
+                }
+            }
         }
-        return $this;
+        return $result;
     }
 
-    /**
-     * Process skipping of entities.
-     */
-    protected function skipEntities(array $dataResources): \BulkImport\Processor\Processor
-    {
-        $resourceName = $this->getResourceName();
-        $this->skipResources($resourceName, $dataResources);
-        return $this;
-    }
-
-    /**
-     * Process skipping of resources.
-     */
-    protected function skipResources($resourceName, array $dataResources): \BulkImport\Processor\Processor
-    {
-        return $this;
-    }
-
-    protected function extractIdentifierOrTitle(ArrayObject $resource): ?string
+    protected function extractIdentifierCommon(ArrayObject $resource): ?string
     {
         if (!empty($resource['dcterms:identifier'][0]['@value'])) {
             return (string) $resource['dcterms:identifier'][0]['@value'];
+        } elseif (!empty($resource['bibo:identifier'][0]['@value'])) {
+            return (string) $resource['bibo:identifier'][0]['@value'];
         }
+        return null;
+    }
+
+    protected function extractIdentifierTitle(ArrayObject $resource): ?string
+    {
         if (!empty($resource['o:display_title'])) {
             return (string) $resource['o:display_title'];
-        }
-        if (!empty($resource['o:resource_template']['o:id'])) {
-            $templateTitleId = $this->bulk->getResourceTemplateTitleIds()[($resource['o:resource_template']['o:id'])] ?? null;
+        } elseif (!empty($resource['o:resource_template']['o:id'])) {
+            $templateTitleId = $this->bulk->resourceTemplateTitleIds()[($resource['o:resource_template']['o:id'])] ?? null;
             if ($templateTitleId && !empty($resource[$templateTitleId][0]['@value'])) {
                 return (string) $resource[$templateTitleId][0]['@value'];
             }
         }
         if (!empty($resource['dcterms:title'][0]['@value'])) {
             return (string) $resource['dcterms:title'][0]['@value'];
-        }
-        if (!empty($resource['foaf:name'][0]['@value'])) {
+        } elseif (!empty($resource['foaf:name'][0]['@value'])) {
             return (string) $resource['foaf:name'][0]['@value'];
-        }
-        if (!empty($resource['skos:preferredLabel'][0]['@value'])) {
+        } elseif (!empty($resource['skos:preferredLabel'][0]['@value'])) {
             return (string) $resource['skos:preferredLabel'][0]['@value'];
         }
         return null;
+    }
+
+    protected function standardOperation(string $action): ?string
+    {
+        $actionsToOperations = [
+            self::ACTION_CREATE => \Omeka\Api\Request::CREATE,
+            self::ACTION_APPEND => \Omeka\Api\Request::UPDATE,
+            self::ACTION_REVISE => \Omeka\Api\Request::UPDATE,
+            self::ACTION_UPDATE => \Omeka\Api\Request::UPDATE,
+            self::ACTION_REPLACE => \Omeka\Api\Request::UPDATE,
+            self::ACTION_DELETE => \Omeka\Api\Request::DELETE,
+            self::ACTION_SKIP => null,
+        ];
+        return $actionsToOperations[$action] ?? null;
     }
 
     protected function actionRequiresId($action = null): bool
@@ -1939,573 +1520,64 @@ abstract class AbstractResourceProcessor extends AbstractProcessor implements Co
         return in_array($action, $actionsUpdate);
     }
 
-    protected function prepareAction(): \BulkImport\Processor\Processor
+    protected function checkAdapter(string $resourceName, string $operation): bool
     {
-        $this->action = $this->getParam('action') ?: self::ACTION_CREATE;
-        if (!in_array($this->action, [
-            self::ACTION_CREATE,
-            self::ACTION_APPEND,
-            self::ACTION_REVISE,
-            self::ACTION_UPDATE,
-            self::ACTION_REPLACE,
-            self::ACTION_DELETE,
-            self::ACTION_SKIP,
-        ])) {
-            $this->logger->err(
-                'Action "{action}" is not managed.', // @translate
-                ['action' => $this->action]
-            );
+        static $checks = [];
+        if (!isset($checks[$resourceName][$operation])) {
+            $adapter = $this->adapterManager->get($resourceName);
+            $checks[$resourceName][$operation] = $this->acl->userIsAllowed($adapter, $operation);
         }
-        return $this;
+        return $checks[$resourceName][$operation];
     }
 
-    protected function prepareActionUnidentified(): \BulkImport\Processor\Processor
+    protected function listValidationMessages(ValidationException $e): array
     {
-        $this->actionUnidentified = $this->getParam('action_unidentified') ?: self::ACTION_SKIP;
-        if (!in_array($this->actionUnidentified, [
-            self::ACTION_CREATE,
-            self::ACTION_SKIP,
-        ])) {
-            $this->logger->err(
-                'Action "{action}" for unidentified resource is not managed.', // @translate
-                ['action' => $this->actionUnidentified]
-            );
-        }
-        return $this;
-    }
-
-    protected function prepareIdentifierNames(): \BulkImport\Processor\Processor
-    {
-        $identifierNames = $this->getParam('identifier_name', ['o:id']);
-        if (empty($identifierNames)) {
-            $this->bulk->setIdentifierNames([]);
-            $this->logger->warn(
-                'No identifier name was selected.' // @translate
-            );
-            return $this;
-        }
-
-        if (!is_array($identifierNames)) {
-            $identifierNames = [$identifierNames];
-        }
-
-        // For quicker search, prepare the ids of the properties.
-        $result = [];
-        foreach ($identifierNames as $identifierName) {
-            $id = $this->bulk->getPropertyId($identifierName);
-            if ($id) {
-                $result[$this->bulk->getPropertyTerm($id)] = $id;
-            } else {
-                $result[$identifierName] = $identifierName;
-            }
-        }
-        $result = array_filter($result);
-        if (empty($result)) {
-            $this->logger->err(
-                'Invalid identifier names: check your params.' // @translate
-            );
-        }
-        $this->bulk->setIdentifierNames($result);
-        return $this;
-    }
-
-    protected function prepareActionIdentifier(): \BulkImport\Processor\Processor
-    {
-        if (!in_array($this->action, [
-            self::ACTION_REVISE,
-            self::ACTION_UPDATE,
-        ])) {
-            $this->actionIdentifier = self::ACTION_SKIP;
-            return $this;
-        }
-
-        // This option doesn't apply when "o:id" is the only one identifier.
-        $identifierNames = $this->bulk->getIdentifierNames();
-        if (empty($identifierNames)
-            || (count($identifierNames) === 1 && reset($identifierNames) === 'o:id')
-        ) {
-            $this->actionIdentifier = self::ACTION_SKIP;
-            return $this;
-        }
-
-        $this->actionIdentifier = $this->getParam('action_identifier_update') ?: self::ACTION_APPEND;
-        if (!in_array($this->actionIdentifier, [
-            self::ACTION_APPEND,
-            self::ACTION_UPDATE,
-        ])) {
-            $this->logger->err(
-                'Action "{action}" for identifier is not managed.', // @translate
-                ['action' => $this->actionIdentifier]
-            );
-            $this->actionIdentifier = self::ACTION_APPEND;
-        }
-
-        // TODO Prepare the list of identifiers one time (only properties) (see extractIdentifiers())?
-        return $this;
-    }
-
-    protected function prepareActionMedia(): \BulkImport\Processor\Processor
-    {
-        $this->actionMedia = $this->getParam('action_media_update') ?: self::ACTION_APPEND;
-        if (!in_array($this->actionMedia, [
-            self::ACTION_APPEND,
-            self::ACTION_UPDATE,
-        ])) {
-            $this->logger->err(
-                'Action "{action}" for media (update of item) is not managed.', // @translate
-                ['action' => $this->actionMedia]
-            );
-            $this->actionMedia = self::ACTION_APPEND;
-        }
-        return $this;
-    }
-
-    protected function prepareActionItemSet(): \BulkImport\Processor\Processor
-    {
-        $this->actionItemSet = $this->getParam('action_item_set_update') ?: self::ACTION_APPEND;
-        if (!in_array($this->actionItemSet, [
-            self::ACTION_APPEND,
-            self::ACTION_UPDATE,
-        ])) {
-            $this->logger->err(
-                'Action "{action}" for item set (update of item) is not managed.', // @translate
-                ['action' => $this->actionItemSet]
-            );
-            $this->actionItemSet = self::ACTION_APPEND;
-        }
-        return $this;
-    }
-
-    /**
-     * Extract main and linked resource identifiers from a resource.
-     *
-     * @todo Check for duplicates.
-     * @todo Take care of actions (update/create).
-     * @todo Take care of specific identifiers (uri, filename, etc.).
-     * @todo Make a process and an output with all identifiers only.
-     * @todo Store the resolved id existing in database one time here (after deduplication), and remove the search of identifiers in second loop.
-     */
-    protected function extractSourceIdentifiers(?ArrayObject $resource, ?Entry $entry = null): \BulkImport\Processor\Processor
-    {
-        if (!$resource) {
-            return $this;
-        }
-
-        $storeMain = function ($idOrIdentifier) use ($resource) {
-            if ($idOrIdentifier) {
-                // No check for duplicates here: it depends on action.
-                $this->identifiers['source'][$this->indexResource][] = $idOrIdentifier;
-                $this->identifiers['revert'][$idOrIdentifier][] = $this->indexResource;
-            }
-            // Source indexes to resource id.
-            $this->identifiers['mapx'][$this->indexResource] = $resource['o:id'] ?? null;
-            if ($idOrIdentifier) {
-                // Source identifiers to resource id.
-                // No check for duplicate here: last map is the right one.
-                $this->identifiers['map'][$idOrIdentifier] = $resource['o:id'] ?? null;
-            }
-        };
-
-        $storeLinkedIdentifier = function ($idOrIdentifier, $vrId) {
-            // As soon as an array exists, a check can be done on identifier,
-            // even if the id is defined later. The same for map.
-            if (!isset($this->identifiers['revert'][$idOrIdentifier])) {
-                $this->identifiers['revert'][$idOrIdentifier] = [];
-            }
-            $this->identifiers['map'][$idOrIdentifier] = $vrId;
-        };
-
-        // Main identifiers.
-        $identifierNames = $this->bulk->getIdentifierNames();
-        foreach ($identifierNames as $identifierName) {
-            if ($identifierName === 'o:id') {
-                $storeMain($resource['o:id'] ?? null);
-            } else {
-                $term = $this->bulk->getPropertyTerm($identifierName);
-                foreach ($resource[$term] ?? [] as $value) {
-                    if (!empty($value['@value'])) {
-                        $storeMain($value['@value']);
-                    }
-                }
-            }
-        }
-
-        // Specific identifiers for items (item sets and media).
-        if ($resource['resource_name'] === 'items') {
-            foreach ($resource['o:item_set'] ?? [] as $itemSet) {
-                if (!empty($itemSet['source_identifier'])) {
-                    $storeLinkedIdentifier($itemSet['source_identifier'], $itemSet['o:id'] ?? null);
-                }
-            }
-            foreach ($resource['o:media'] ?? [] as $media) {
-                if (!empty($media['source_identifier'])) {
-                    $storeLinkedIdentifier($media['source_identifier'], $media['o:id'] ?? null);
-                }
-            }
-        }
-
-        // Specific identifiers for media (item).
-        if ($resource['resource_name'] === 'media') {
-            if (!empty($resource['o:item']['source_identifier'])) {
-                $storeLinkedIdentifier($resource['o:item']['source_identifier'], $resource['o:item']['o:id'] ?? null);
-            }
-        }
-
-        // Store identifiers for linked resources.
-        $properties = $this->bulk->getPropertyIds();
-        foreach (array_intersect_key($resource->getArrayCopy(), $properties) as $term => $values) {
-            if (!is_array($values)) {
-                continue;
-            }
-            foreach ($values as $value) {
-                if (is_array($value)
-                    && isset($value['property_id'])
-                    && !empty($value['source_identifier'])
-                ) {
-                    $storeLinkedIdentifier($value['source_identifier'], $value['value_resource_id'] ?? null);
-                }
-            }
-        }
-
-        return $this;
-    }
-
-    /**
-     * Store new id when source contains identifiers not yet imported.
-     *
-     * Identifiers are already stored during first loop. So just set final id.
-     */
-    protected function storeSourceIdentifiersIds(array $dataResource, AbstractResourceEntityRepresentation $resource): \BulkImport\Processor\Processor
-    {
-        $resourceId = $resource->id();
-        if (empty($resourceId) || empty($dataResource['source_index'])) {
-            return $this;
-        }
-
-        // Source indexes to resource id (filled when found or created).
-        $this->identifiers['mapx'][$dataResource['source_index']] = $resourceId;
-
-        // Source identifiers to resource id (filled when found or created).
-        // No check for duplicate here: last map is the right one.
-        foreach ($this->identifiers['source'][$dataResource['source_index']] ?? [] as $idOrIdentifier) {
-            $this->identifiers['map'][$idOrIdentifier] = $resourceId;
-        }
-
-        return $this;
-    }
-
-    /**
-     * Set missing ids when source contains identifiers not yet imported during
-     * resource building.
-     */
-    protected function completeResourceIdentifierIds(array $resource): array
-    {
-        if (empty($resource['o:id'])
-            && !empty($resource['source_index'])
-            && !empty($this->identifiers['mapx'][$resource['source_index']])
-        ) {
-            $resource['o:id'] = $this->identifiers['mapx'][$resource['source_index']];
-        }
-
-        if ($resource['resource_name'] === 'items') {
-            foreach ($resource['o:item_set'] ?? [] as $key => $itemSet) {
-                if (empty($itemSet['o:id'])
-                    && !empty($itemSet['source_identifier'])
-                    && !empty($this->identifiers['map'][$itemSet['source_identifier']])
-                    // TODO Add a check for item set identifier.
-                ) {
-                    $resource['o:item_set'][$key]['o:id'] = $this->identifiers['map'][$itemSet['source_identifier']];
-                }
-            }
-            // TODO Fill media identifiers for update here?
-        }
-
-        if ($resource['resource_name'] === 'media'
-            && empty($resource['o:item']['o:id'])
-            && !empty($resource['o:item']['source_identifier'])
-            && !empty($this->identifiers['map'][$resource['o:item']['source_identifier']])
-            // TODO Add a check for item identifier.
-        ) {
-            $resource['o:item']['o:id'] = $this->identifiers['map'][$resource['o:item']['source_identifier']];
-        }
-
-        foreach ($resource as $term => $values) {
-            if (!is_array($values)) {
-                continue;
-            }
-            foreach ($values as $key => $value) {
-                if (is_array($value)
-                    && isset($value['property_id'])
-                    // Avoid to test the type (resources and some custom vocabs).
-                    && array_key_exists('value_resource_id', $value)
-                    && empty($value['value_resource_id'])
-                    && !empty($value['source_identifier'])
-                    && !empty($this->identifiers['map'][$value['source_identifier']])
-                ) {
-                    $resource[$term][$key]['value_resource_id'] = $this->identifiers['map'][$value['source_identifier']];
-                }
-            }
-        }
-
-        return $resource;
-    }
-
-    /**
-     * Prepare full mapping one time to simplify and speed process.
-     *
-     * Add automapped metadata for properties (language and datatypes).
-     *
-     * @todo Merge this method with transformSource::getNormalizedConfig().
-     */
-    protected function prepareMapping(): \BulkImport\Processor\Processor
-    {
-        $isPrepared = false;
-        if (method_exists($this->reader, 'getConfigParam')) {
-            $mappingConfig = $this->reader->getParam('mapping_config') ?: $this->reader->getConfigParam('mapping_config');
-            if ($mappingConfig) {
-                $isPrepared = true;
-                $mapping = [];
-                // TODO Avoid to prepare the mapping a second time when the reader prepared it.
-                $this->initTransformSource($mappingConfig, $this->reader->getParams());
-                $mappingSource = array_merge(
-                    $this->transformSource->getSection('default'),
-                    $this->transformSource->getSection('mapping')
-                );
-                foreach ($mappingSource as $fromTo) {
-                    // The from is useless here, the entry takes care of it.
-                    if (isset($fromTo['to']['dest'])) {
-                        // Manage multimapping: there may be multiple target fields.
-                        // TODO Improve multimapping management (for spreadsheet in fact).
-                        $mapping[$fromTo['to']['dest']][] = $fromTo['to']['field'] ?? null;
-                    }
-                }
-                // Filter duplicated and null values.
-                foreach ($mapping as &$datas) {
-                    $datas = array_values(array_unique(array_filter(array_map('strval', $datas), 'strlen')));
-                }
-                unset($datas);
-
-                // These mappings are added automatically with JsonEntry.
-                // TODO Find a way to add automatic mapping in transformSource or default mapping.
-                if (!isset($mapping['url'])) {
-                    $mapping['url'] = ['url'];
-                }
-                if (!isset($mapping['iiif'])) {
-                    $mapping['iiif'] = ['iiif'];
-                }
-            }
-        }
-
-        if (!$isPrepared) {
-            $mapping = $this->getParam('mapping', []);
-        }
-
-        if (!count($mapping)) {
-            $this->hasMapping = false;
-            $this->mapping = [];
-            return $this;
-        }
-
-        // The automap is only used for language, datatypes and visibility:
-        // the properties are the one that are set by the user.
-        // TODO Avoid remapping or factorize when done in transformSource.
-        /** @var \BulkImport\Mvc\Controller\Plugin\AutomapFields $automapFields */
-        $automapFields = $this->getServiceLocator()->get('ControllerPluginManager')->get('automapFields');
-        $sourceFields = $automapFields(array_keys($mapping), ['output_full_matches' => true]);
-
-        $index = -1;
-        foreach ($mapping as $sourceField => $targets) {
-            ++$index;
-            if (empty($targets)) {
-                continue;
-            }
-
-            // The automap didn't find any matching.
-            if (empty($sourceFields[$index])) {
-                foreach ($targets as $target) {
-                    $sourceFields[$index][] = [
-                        'field' => $target,
-                        'language' => null,
-                        'type' => null,
-                        'is_public' => null,
-                    ];
-                }
-            }
-
-            // Default metadata (datatypes, language and visibility).
-            // For consistency, only the first metadata is used.
-            $metadatas = $sourceFields[$index];
-            $metadata = reset($metadatas);
-
-            $fullTargets = [];
-            foreach ($targets as $target) {
-                $result = [];
-                // Field is the property found by automap, or any other metadata.
-                // This value is not used, but may be useful for messages.
-                $result['field'] = $metadata['field'];
-
-                // Manage the property of a target when it is a resource type,
-                // like "o:item_set [dcterms:title]".
-                // It is used to set a metadata for derived resource (media for
-                // item) or to find another resource (item set for item, as an
-                // identifier name).
-                $pos = strpos($target, '[');
-                if ($pos) {
-                    $targetData = trim(substr($target, $pos + 1), '[] ');
-                    $target = trim(substr($target, $pos));
-                    $result['target'] = $target;
-                    $result['target_data'] = $targetData;
-                    $propertyId = $this->bulk->getPropertyId($targetData);
-                    if ($propertyId) {
-                        $subValue = [];
-                        $subValue['property_id'] = $propertyId;
-                        // TODO Allow different types for subvalues (inside "[]").
-                        $subValue['type'] = 'literal';
-                        $subValue['is_public'] = true;
-                        $result['target_data_value'] = $subValue;
-                    }
+        $messages = [];
+        foreach ($e->getErrorStore()->getErrors() as $error) {
+            foreach ($error as $message) {
+                // Some messages can be nested.
+                if (is_array($message)) {
+                    $result = [];
+                    array_walk_recursive($message, function ($v) use (&$result): void {
+                        $result[] = $v;
+                    });
+                    $message = $result;
+                    unset($result);
                 } else {
-                    $result['target'] = $target;
+                    $message = [$message];
                 }
-
-                $propertyId = $this->bulk->getPropertyId($target);
-                if ($propertyId) {
-                    $datatypes = [];
-                    // Normally already checked.
-                    foreach ($metadata['datatype'] ?? [] as $datatype) {
-                        $datatypes[] = $this->bulk->getDataTypeName($datatype);
-                    }
-                    $datatypes = array_filter(array_unique($datatypes));
-                    if (empty($datatypes)) {
-                        $datatype = 'literal';
-                    } elseif (count($datatypes) === 1) {
-                        $datatype = reset($datatypes);
-                    } else {
-                        $datatype = null;
-                    }
-                    $result['value']['property_id'] = $propertyId;
-                    $result['value']['type'] = $datatype;
-                    $result['value']['@language'] = $metadata['language'];
-                    $result['value']['is_public'] = $metadata['is_public'] !== 'private';
-                    if (is_null($datatype)) {
-                        $result['datatype'] = $datatypes;
-                    }
-                }
-                // A specific or module field. These fields may be useless.
-                // TODO Check where this exception is used.
-                else {
-                    $result['full_field'] = $sourceField;
-                    $result['@language'] = $metadata['language'];
-                    $result['type'] = empty($metadata['datatype'])
-                        ? null
-                        : (is_array($metadata['datatype']) ? reset($metadata['datatype']) : (string) $metadata['datatype']);
-                    $result['is_public'] = $metadata['is_public'] !== 'private';
-                }
-
-                $fullTargets[] = $result;
+                $messages = array_merge($messages, array_values($message));
             }
-            $mapping[$sourceField] = $fullTargets;
         }
-
-        // Filter the mapping to avoid to loop entries without target.
-        $this->mapping = array_filter($mapping);
-        // Some readers don't need a mapping (xml reader do the process itself).
-        $this->hasMapping = (bool) $this->mapping;
-
-        return $this;
+        return $messages;
     }
 
     /**
-     * Prepare other internal data.
+     * @todo Find a less quick and dirty way to get the field types.
      */
-    protected function appendInternalParams(): \BulkImport\Processor\Processor
+    protected function getFieldTypesForResource(?string $resourceName): array
     {
-        $settings = $this->getServiceLocator()->get('Omeka\Settings');
-        $internalParams = [];
-        $internalParams['iiifserver_media_api_url'] = $settings->get('iiifserver_media_api_url', '');
-        if ($internalParams['iiifserver_media_api_url']
-            && mb_substr($internalParams['iiifserver_media_api_url'], -1) !== '/'
-        ) {
-            $internalParams['iiifserver_media_api_url'] .= '/';
-        }
-        $this->setParams(array_merge($this->getParams() + $internalParams));
-        return $this;
-    }
+        static $fieldTypesForResource = [];
 
-    /**
-     * Create a new asset from a url.
-     *
-     * @todo Find the good position of this function.
-     * @todo Rewrite and simplify.
-     */
-    protected function createAssetFromUrl(string $pathOrUrl, ?MessageStore $messageStore = null): ?Asset
-    {
-        // AssetAdapter requires an uploaded file, but it's common to use urls
-        // in bulk import.
-        $isUrl = $this->bulk->isUrl($pathOrUrl);
-        $this->checkAssetMediaType = true;
-        if ($isUrl) {
-            $result = $this->checkUrl($pathOrUrl, $messageStore);
-        } else {
-            $result = $this->checkFile($pathOrUrl, $messageStore);
-        }
-        if (!$result) {
-            return null;
+        $resourceName = $this->easyMeta->resourceName($resourceName);
+        if (!$resourceName) {
+            return [];
         }
 
-        $storageId = bin2hex(\Laminas\Math\Rand::getBytes(20));
-        $filename = mb_substr(basename($pathOrUrl), 0, 255);
-        // TODO Set the real extension via tempFile().
-        $extension = pathinfo($pathOrUrl, PATHINFO_EXTENSION);
+        $resourceNamesToProcessor = [
+            'assets' => AssetProcessor::class,
+            'items' => ItemProcessor::class,
+            'media' => MediaProcessor::class,
+            'item_sets' => ItemSetProcessor::class,
+            'resources' => ResourceProcessor::class,
+        ];
 
-        if ($isUrl) {
-            $result = $this->fetchUrl(
-                'asset',
-                $filename,
-                $filename,
-                $storageId,
-                $extension,
-                $pathOrUrl
-            );
-            if ($result['status'] !== 'success') {
-                $messageStore->addError('file', $result['message']);
-                return null;
-            }
-            $fullPath = $result['data']['fullpath'];
-        } else {
-            $isAbsolutePathInsideDir = strpos($pathOrUrl, $this->sideloadPath) === 0;
-            $fileinfo = $isAbsolutePathInsideDir
-                ? new \SplFileInfo($pathOrUrl)
-                : new \SplFileInfo($this->sideloadPath . DIRECTORY_SEPARATOR . $pathOrUrl);
-            $realPath = $fileinfo->getRealPath();
-            $this->store->put($realPath, 'asset/' . $storageId . '.' . $extension);
-            $fullPath = $this->basePath . '/asset/' . $storageId . '.' . $extension;
+        if (!isset($fieldTypesForResource[$resourceName])) {
+            $specificProcessor = $resourceNamesToProcessor[$resourceName];
+            $specificProcessor = new $specificProcessor($this->getServiceLocator());
+            $fieldTypesForResource[$resourceName] = $specificProcessor->getFieldTypes();
         }
 
-        // A check to get the real medai-type and extension.
-        $finfo = new \finfo(FILEINFO_MIME_TYPE);
-        $mediaType = $finfo->file($fullPath);
-        $mediaType = \Omeka\File\TempFile::MEDIA_TYPE_ALIASES[$mediaType] ?? $mediaType;
-        // TODO Get the extension from the media type or use standard asset uploaded.
-
-        // This doctrine resource should be reloaded each time the entity
-        // manager is cleared, else a error may occur on big import.
-        $entityManager = $this->getServiceLocator()->get('Omeka\EntityManager');
-        $this->user = $entityManager->find(\Omeka\Entity\User::class, $this->userId);
-
-        $asset = new \Omeka\Entity\Asset;
-        $asset->setName($filename);
-        // TODO Use the user specified in the config (owner).
-        $asset->setOwner($this->user);
-        $asset->setStorageId($storageId);
-        $asset->setExtension($extension);
-        $asset->setMediaType($mediaType);
-        $asset->setAltText(null);
-
-        // TODO Remove this flush (required because there is a clear() after checks).
-        $entityManager->persist($asset);
-        $entityManager->flush();
-
-        return $asset;
+        return $fieldTypesForResource[$resourceName];
     }
 }

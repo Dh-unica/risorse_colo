@@ -76,10 +76,10 @@ class Pdf
     protected $_dataFields_utf8;
 
     /**
-     * @var Pdf|null if the input was an instance, we keep a reference here, so
-     * that it won't get unlinked before this object gets destroyed
+     * @var Pdf[]|null if the input was an instance, we keep a reference here,
+     * so that it won't get unlinked before this object gets destroyed
      */
-    protected $_pdf;
+    protected $_pdfs;
 
     /**
      * @param string|Pdf|array $pdf a pdf filename or Pdf instance or an array
@@ -124,7 +124,7 @@ class Pdf
         }
         if ($name instanceof Pdf) {
             // Keep a reference to the object to prevent unlinking
-            $this->_pdf = $name;
+            $this->_pdfs[] = $name;
             if (!$name->getCommand()->getExecuted()) {
                 // @todo: Catch errors!
                 $name->execute();
@@ -232,6 +232,27 @@ class Pdf
     }
 
     /**
+     * Attach files to the PDF
+     *
+     * @param array $files the list of full paths to the files to attach
+     * @param string $toPage the page to add the attachment to. If omitted the
+     * files are attached at the document level.
+     * @return bool whether the operation was successful
+     */
+    public function attachFiles($files, $toPage = null)
+    {
+        $this->constrainSingleFile();
+        if ($toPage !== null) {
+            $files[] = 'to_page';
+            $files[] = $toPage;
+        }
+        $this->getCommand()
+            ->setOperation('attach_files')
+            ->setOperationArgument($files, true);
+        return $this;
+    }
+
+    /**
      * Copy all attachments from the PDF to the given directory
      *
      * @param string|null $dir the output directory
@@ -300,7 +321,7 @@ class Pdf
     public function updateInfo($data, $encoding = 'UTF-8')
     {
         $this->constrainSingleFile();
-        if (is_array($data)) {
+        if (is_array($data) || $data instanceof InfoFields) {
             $data = new InfoFile($data, null, null, $this->tempDir, $encoding);
         }
         $this->getCommand()
@@ -568,6 +589,23 @@ class Pdf
     }
 
     /**
+     * Replace embedded font with a local font when filling a form.
+     *
+     * This option is only available for pdftk-java >= 3.3.0. It is useful when
+     * filling a form with non-ASCII text that is not supported by the fonts
+     * included in the input PDF.
+     *
+     * @param string $fontName the path to the font or the name of a font family.
+     * @return Pdf the pdf instance for method chaining
+     */
+    public function replacementFont($path)
+    {
+        $this->getCommand()
+            ->addOption('replacement_font', $path);
+        return $this;
+    }
+
+    /**
      * Execute the operation and save the output file
      *
      * @param string $name of output file
@@ -593,14 +631,21 @@ class Pdf
      * streamed inline.
      * @param bool $inline whether to force inline display of the PDF, even if
      * filename is present.
+     * @param array $headers a list of additional HTTP headers to send in the
+     * response as an array. The array keys are the header names like
+     * 'Cache-Control' and the array values the header value strings to send.
+     * Each array value can also be another array of strings if the same header
+     * should be sent multiple times. This can also be used to override
+     * automatically created headers like 'Expires' or 'Content-Length'. To suppress
+     * automatically created headers, `false` can also be used as header value.
      * @return bool whether PDF was created successfully
      */
-    public function send($filename = null, $inline = false)
+    public function send($filename = null, $inline = false, $headers = array())
     {
         if (!$this->getCommand()->getExecuted() && !$this->execute()) {
             return false;
         }
-        $this->getTmpFile()->send($filename, $this->_tmpOutputContentType, $inline);
+        $this->getTmpFile()->send($filename, $this->_tmpOutputContentType, $inline, $headers);
         return true;
     }
 

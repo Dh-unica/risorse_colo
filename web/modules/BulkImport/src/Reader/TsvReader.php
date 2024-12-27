@@ -2,11 +2,11 @@
 
 namespace BulkImport\Reader;
 
-use Box\Spout\Common\Type;
 use BulkImport\Form\Reader\SpreadsheetReaderConfigForm;
 use BulkImport\Form\Reader\TsvReaderParamsForm;
 use Laminas\Form\Form;
 use Laminas\ServiceManager\ServiceLocatorInterface;
+use OpenSpout\Common\Type;
 
 class TsvReader extends CsvReader
 {
@@ -35,7 +35,7 @@ class TsvReader extends CsvReader
         $this->escape = chr(0);
     }
 
-    public function handleParamsForm(Form $form)
+    public function handleParamsForm(Form $form): self
     {
         parent::handleParamsForm($form);
         $params = $this->getParams();
@@ -47,7 +47,7 @@ class TsvReader extends CsvReader
         return $this;
     }
 
-    protected function reset(): \BulkImport\Reader\Reader
+    protected function reset(): self
     {
         parent::reset();
         $this->delimiter = "\t";
@@ -56,13 +56,12 @@ class TsvReader extends CsvReader
         return $this;
     }
 
-    protected function isValidFilepath($filepath, array $file = []): bool
+    protected function checkFileArray(array $file = []): array
     {
         // On some servers, type for csv is "application/vnd.ms-excel".
         if (!empty($file['type']) && $file['type'] === 'application/vnd.ms-excel') {
             $file['type'] = 'text/tab-separated-values';
         }
-
-        return parent::isValidFilepath($filepath, $file);
+        return $file;
     }
 }

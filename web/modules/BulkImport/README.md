@@ -5,40 +5,52 @@ Bulk Import (module for Omeka S)
 > are available on [GitLab], which seems to respect users and privacy better
 > than the previous repository.__
 
+Voir le [Lisez-moi] en français.
+
 [Bulk Import] is a module for [Omeka S] that allows to import any type of source
 and is built to be extensible. It allows to manage importers and to process bulk
 import of resources.
 
-Furthermore, it adds a way to bulk upload files manually without limit of [size or number of files].
+The import process is done in three steps:
 
-For bulk import, the module manages readers of a source (xml, sql, spreadsheet,
-url…) and uses processors to import them as Omeka resources and other data
-(users, templates…) via a mapping.
+- read a source, that can be a file, a endpoint, a url, or a list of urls or
+  files. The content can be xml, json, sql, or spreadsheet.
+- map source content into omeka content via a mapping, that can be manual,
+  automatic or pre-configured. The mapping can be stored to be replayed later.
+- process an action, that can be creation or update, in various modes into
+  various resources (items, medias, item sets, assets, etc.).
 
-Because multiple importers can be prepared with the same readers and processors,
-it is possible to import multiple times the same type of files without needing
-to do the mapping each time.
+Because multiple importers can be prepared with the same readers, mappings and
+processors, it is possible to import multiple times the same type of files
+without needing to do the mapping each time.
 
-Default readers are Omeka S reader (via the api json endpoint), xml (via
-transformation with xslt), sql (to adapt to each database, an example for [e-prints]
-is provided), [Spip] reader (via a dump of the database), and spreadsheet reader
-(via ods, tsv or csv). The spreadsheet uses a processor that creates resources
-based on a specific header format, but don't have a pretty manual ui like the
-module [CSV Import].
+Default importers are:
+
+- xml METS and EAD
+- json from IIIF or from Content-DM
+- sql
+- spreadsheets (csv, tsv, ods)
+- Omeka Classic
+- Omeka S
 
 
 Installation
 ------------
 
-This module requires the module [Log] and optionaly [Generic]. An external xslt 2
-processor may be needed if you import xml files that are not importable with
-xlt 1. Some specific readers or processors may need some other modules.
+This module requires the modules [Log] and [Common]. An external xslt 2 processor
+may be needed if you import xml files that are not importable with xlt 1. Some
+specific readers or processors may need some other modules.
 
-**Important**: If you use the module [CSV Import] in parallel, you should apply
-[this patch] or use [this version].
+Since 3.4.39, the module requires php 7.4.
+
+**Warning**: Some parts of this module may not support use of remote files: only
+files saved locally on the server may be managed.
+
+**Important**: If you use the module [CSV Import] in parallel, you should use a
+version equal or greater than 2.3.0.
 
 **Important**: If you use the module [Numeric Data Types], you should apply this
-[other patch] or use this [other version].
+[patch] or use this [version]. This patch is no more needed since version 4.1.
 
 See general end user documentation for [installing a module].
 
@@ -58,13 +70,13 @@ composer install --no-dev
 
 Note: the library "CodeMirror" has no file "codemirror.js" by default: it is
 created automatically when installing packages with npm. To use it via composer,
-the missing file is added in the package used by composer.
+the zip file from codemirror.net (v5) is used.
 
 Then install it like any other Omeka module.
 
 * Files extensions
 
-For security reasons, the plugin checks the extension of each ingested file. So,
+For security reasons, the module checks the extension of each ingested file. So,
 if you import specific files, in particular XML metadata files and json ones,
 they should be allowed in the page `/admin/setting`.
 
@@ -79,7 +91,7 @@ your system. It is until ten times slower than xslt 2.0 and sheets are more
 complex to write.
 
 So it’s recommended to install an xslt 2 processor, that can process xslt 1.0
-and xslt 2.0 sheets.
+and xslt 2.0 sheets and generally xslt 3.0 too.
 
 To intall xslt 2 on Debian / Ubuntu :
 ```sh
@@ -91,22 +103,22 @@ Use "%1$s", "%2$s", "%3$s", without escape, for the file input, the stylesheet,
 and the output.
 
 Examples for Debian 6+ / Ubuntu / Mint (with the package "libsaxonb-java"):
-```
+```sh
 saxonb-xslt -ext:on -versionmsg:off -warnings:silent -s:%1$s -xsl:%2$s -o:%3$s
 ```
 
 Examples for Debian 8+ / Ubuntu / Mint (with the package "libsaxonhe-java"):
-```
+```sh
 CLASSPATH=/usr/share/java/Saxon-HE.jar java net.sf.saxon.Transform -ext:on -versionmsg:off -warnings:silent -s:%1$s -xsl:%2$s -o:%3$s
 ```
 
 Example for Fedora / RedHat / Centos / Mandriva / Mageia (package "saxon"):
-```
+```sh
 java -cp /usr/share/java/saxon.jar net.sf.saxon.Transform -ext:on -versionmsg:off -warnings:silent -s:%1$s -xsl:%2$s -o:%3$s
 ```
 
 Or with packages "saxon", "saxon-scripts", "xml-commons-apis" and "xerces-j2":
-```
+```sh
 saxon -ext:on -versionmsg:off -warnings:silent -s:%1$s -xsl:%2$s -o:%3$s
 ```
 
@@ -119,7 +131,7 @@ is important to be able to process an import with a bad xsl sheet. It can be
 removed with default xsl, that doesn’t warn anything.
 
 Anyway, if there is no xslt2 processor installed, the command field should be
-cleared. The plugin will use the default xslt 1 processor of php, if installed.
+cleared. The module will use the default xslt 1 processor of php, if installed.
 
 
 Usage
@@ -138,8 +150,8 @@ data between the source and the omeka json representation of resources.
 
 The config can be selected in the first form. New config can be added in the
 directory "data/mapping" of the module (default ones) or in the directory
-"files/mapping" of Omeka (user ones). They can be edited online in the menu
-"Mappings" too.
+"files/mapping" of Omeka (user ones, deprecated: use config files preferably).
+They can be edited online in the menu "Mappings" too.
 
 ### Config files
 
@@ -152,95 +164,123 @@ module.
 
 The second section is `params`, that allows to define some params, like how to
 identify the root of the resources, or the fields of each resource. See the
-example used to migrate a digital library from Content-dm. For this last, the
+example used to migrate a digital library from Content-DM. For this last, the
 url should be the full one, like https://cdm21057.contentdm.oclc.org/digital/api/search/collection/coll3/maxRecords/100.
 
 The third section is `default` and defines default metadata of the resources,
 like the resource class or the template.
 
 The fourth section is `mapping` and contains all the source fields that should
-be imported and all the details about the destination field.
+be imported and all the details about the destination field (properties or other
+metadata).
 
 ### Config of the mappings
 
 The config contains a list of mappings between source data and destination data.
-Mapping can be done in two formats: ini or xml.
+Mapping can be done in two formats: key-value pair or xml.
 
 For example:
 
 ```
-source or xpath = dcterms:title @fr-fr ^^literal §private ~ pattern for the {{ value|trim }} with {{/source/record/data}}
+/record/datafield[@tag='200'][@ind1='1']/subfield[@code='a'] = dcterms:title ^^literal @fra §private ~ pattern for {{ value|trim }} with {{/source/record/data}}
 ```
 
-will be converted internally and used to create a resource like that:
-
-```php
-[
-     'from' => 'source or xpath',
-     'to' => [
-         'field' => 'dcterms:title',
-         'property_id' => 1,
-         'type' => 'literal',
-         '@language' => 'fr-fr',
-         'is_public' => false,
-         'pattern' => 'pattern for the {{ value|trim }} with {{/source/record/data}}',
-         'replace' => [
-             '{{/source/record/data}}',
-         ],
-         'twig' => [
-             '{{ value|trim }}',
-         ],
-     ],
-]
-```
-
-For xml, the mapping is like that:
+For xml, the same mapping is like that:
 
 ```xml
 <mapping>
     <map>
         <from xpath="/record/datafield[@tag='200'][@ind1='1']/subfield[@code='a']"/>
-        <to field="dcterms:title" datatypes="literal" language="" visibility="" raw="" prepend="" pattern="" append=""/>
+        <to field="dcterms:title" datatype="literal" language="fra" visibility="private"/>
+        <mod raw="" prepend="pattern for " pattern="{{ value|trim }} with {{/source/record/data}}" append=""/>
     </map>
 </mapping>
 ```
 
-A config is composed of multiple lines. The sections like "[info]" are managed:
-the next lines will be a sub-array.
+The xml format is clearer, but the key-value pair can be used anywhere, included
+the headers of a spreadsheet.
+
+#### Key-value pair notation
 
 Each line is formatted with a source and a destination separated with the sign
-"=". The format of each part (left and right of the "=") of each line is
-checked, but not if it has a meaning.
+`=`. The format of each part (left and right of the `=`) of each line is
+checked in a first step and is skipped if incorrect.
 
-The source part may be the key in an array, or in a sub-array (`dcterms:title.0.@value`),
-or a xpath (used when the input is xml).
+The source part can be specified in three ways: javascript dot notation,
+JsonPath, JMESPath, or XPath (see below).
 
-The destination part is an automap field. It has till five components and only
-the first is required.
+The destination part has one till five components and only the first is
+required.
 
 The first must be the destination field. The field is one of the key used in the
 json representation of a resource, generally a property, but other metadata too
-("o:resource_template", etc.). It can be a sub-field too, in particular to
+(`o:resource_template`, etc.). It can be a sub-field too, in particular to
 specify related resources when importing an item: `o:media[o:original_url]`,
 `o:media[o:ingester]`, or `o:item_set[dcterms:identifier]`.
 
 The next three components are specific to properties and can occur in any order
 and are prefixed with a code, similar to some rdf representations:
-The language is prefixed with a `@`: `@fr-FR` or `@fra`.
-The data type is prefixed with a `^^`: `^^resource:item` or `^^customvocab:Liste des établissements`.
-The visibility is prefixed with a `§`: `§public` or `§private`.
+- the data type is prefixed with a `^^`: `^^resource:item` or `^^customvocab:5`;
+- the language is prefixed with a `@`: `@fra` or `@fr-FR`;
+- the visibility is prefixed with a `§`: `§private` or `§public`.
 
 The last component is a pattern used to transform the source value when needed.
 It is prefixed with a `~`. It can be a simple replacement string, or a complex
-pattern with some [Twig] commands.
+pattern with some [Twig] commands (see below).
+
+For default values, the right part may be a simple string starting and ending
+with a simple or double quotes, in which case the left part is the destination.
+Next three lines are equivalent:
+
+```
+dcterms:license = dcterms:license ^^literal ~ "Public domain"
+~ = dcterms:license ^^literal ~ "Public domain"
+dcterms:license = ^^literal ~ "Public domain"
+dcterms:license = "Public domain"
+```
+
+#### xml mapping
+
+The example above is clear and contains main elements and attributes. See the
+[example mapping for Unimarc].
+
+Le format Xml allows too to specify mapping tables for codes, for example to
+convert an iso code to a literal.
+
+### Defining the source of the value
+
+Four formats are supported, the first three for a json endpoint, and the last
+for an xml source:
+
+- Javascript dot object notation: The source is set nearly like a javascript
+  with dot notation (even invalid): `dcterms:title.0.value`. `.` and `\` must be
+  escaped with a `\`.
+
+- [JsonPath]: This is a port of XPath for json: `$.['dcterms:title'][0].['@value']`,
+  and it can manage a lot of expressions, filters, functions, etc.
+
+- [JMESPath]: This is another port of xpath for json: `"dcterms:title"[0]"@value"`,
+  and it can manage a lot of expressions, filters, functions, etc. JMESPath is
+  similar to the original idea for a [JsonPath], but they are not compatible
+  themselves.
+
+- XPath: it can use any standard XPath: `/record/datafield[@tag='200'][@ind1='1']/subfield[@code='a']`
+  when the source is xml.
+
+### Defining the transformation (raw value, prepend/append, replacements)
+
+If you need to alter the source value and format it differently, you can use
+some patterns.
 
 A simple replacement string is a pattern with some replacement values:
 ```
 geonameId = dcterms:identifier ^^uri ~ https://www.geonames.org/{{ value }}
 ```
 
-The available replacement patterns are: the current source value `{{ value }}`
-and any source query `{{xxx}}`, for example a xpath `{{/doc/str[@name="ppn_z"]}}`.
+The available replacement patterns are:
+- the current source value `{{ value }}`
+- any source query `{{xxx}}`, for example a xpath `{{/doc/str[@name="ppn_z"]}}`.
+
 `{{ value }}` and `{{value}}` are not the same: the first is the current value
 extracted from the source part and the second is the key used to extract the
 value with the key `value` from a source array.
@@ -267,8 +307,8 @@ some specific functions are added: `table`, to replace a code with a string,
 `unimarcCoordinates`, `unimarcCoordinatesHexa`, `unimarcTimeHexa`.
 
 To see a full example, look to the file that manage [Unimarc conversion to Omeka].
-Note that this file will be improved soon to manage value annotations, a very
-interesting improvement for Omeka 3.2.
+Note that this file will be improved soon to manage value annotations, an
+important improvement for Omeka 3.2.
 
 The Twig filters can be used in conjunction with simple replacements. In that
 case, they are processed after the replacements.
@@ -293,18 +333,21 @@ E-prints
 [e-prints] is a tool to build institutional repository (research articles,
 student works, learning resources, etc.). It is one of the oldest free digital
 libraries that support the OAI-PMH protocol. Because Omeka S can be [OAI-PMH repository],
-an upgrade to it can be useful.
+it is possible to upgrade to it. The process uses the sql database in order to
+fetch all metadata.
 
 Simply select the sql reader and the eprints processor, then follow the forms.
+
+This importer is no more available for now.
 
 
 Omeka S
 -------
 
-Simply set the endpoint and eventually the credentials and run it. All data are
-fetch: vocabularies, resource templates, assets and of course items, item sets
-and media. Custom vocabs are imported too. It is recommended to have the same
-modules installed, in particular those that add new data types (Value Suggest,
+Simply set the endpoint and eventually the credentials and run it. All data can
+be fetched: vocabularies, resource templates, assets and of course items, item
+sets and media. Custom vocabs are imported too. It is recommended to have the
+same modules installed, in particular those that add new data types (Value Suggest,
 Numeric Data Types, Rdf Data Types, Data Type Geometry).
 Specific metadata of other modules are currently not managed.
 
@@ -312,9 +355,7 @@ Specific metadata of other modules are currently not managed.
 Spip
 ----
 
-Simply set the database credentials and  the endpoint and go on. You need to
-install some more modules: [Advanced Resource Template], [Article], [Custom Vocab],
-[Data Type Rdf], [Numeric Data Types], [Spip ], [Thesaurus], [User Profile].
+The direct import from [Spip] was removed in version 3.4.55.
 
 
 Spreadsheet
@@ -322,7 +363,7 @@ Spreadsheet
 
 To import a spreadsheet, choose its format and the multivalue separator if any.
 Then do the mapping. The mapping is automatic when the header are properties
-label, or existing terms, or Omeka metadata names, or existing keywords.
+labels or terms, or Omeka metadata names, or existing keywords.
 
 When importing an ODS file with formulas, try to set `string` or `general` as
 the default format of cells to avoid an issue when a formula returns a string,
@@ -332,10 +373,10 @@ in some spreadheets.
 
 More largely, it's not recommended to use formulas and formatted cells, since it
 is not possible to be sure what are the actual data (the real ones or the
-displayed ones?). Even if it is well managed in most of the case, this is
+displayed ones?). Even if it is well managed in most of the cases, this is
 particularly important for dates, because they are often different between
-spreadsheets and version of the spreadsheets too. Some versions of Excel on
-Apple have does not display the same dates than the equivalent versions for
+publishers and even between versions of the spreadsheets too. Some versions of
+Excel on Apple does not display the same dates than the equivalent versions for
 Windows. You can do select all cells (ctrl + A), then copy (ctrl + C), then
 special paste (ctrl + shift + V), then choose "Values only", and save it in
 another file (or do copy on a new sheet), else you will lose previous formulas,
@@ -343,16 +384,17 @@ styles and formats.
 
 Unlike CSV Import, there is no UI mapper except for the properties, but it
 manages advanced headers names to manage data types, languages and visibility
-automatically, so it is recommended to use them, for example `dcterms:title @fra ^^resource:item §private`.
+automatically, so it is recommended to use them, for example `dcterms:title ^^resource:item @fra §private`.
+The format is  the same than described above for the destination.
 
 Furthermore, there is a configurable automatic mapping in [data/mappings/fields_to_metadata.php],
-and standard property terms are already managed.
+and labels and names of standard property terms are already managed.
 
-So the header of each column can have a language (with `@language`), a datatype
-(with `^^datatype`), and a visibility (with `§private`). Furthermore, a pattern
-(prefixed with "~") can be appended to transform the value.
+So the header of each column can have a data type (with `^^datatype`), a
+language (with `@language`), and a visibility (with `§private`). Furthermore, a
+pattern (prefixed with `~`) can be appended to transform the value.
 
-For example to import a French title, use header `Title @fr` or `dcterms:title @fra`.
+For example to import a French title, use header `Title @fra` or `dcterms:title @fr`.
 
 To import a relation as an uri, use header `Relation ^^uri` or `dcterms:relation ^^uri`.
 To import an uri with a label, the header is the same, but the value should be
@@ -361,9 +403,10 @@ To import a value as an Omeka resource, use header `dcterms:relation ^^resource`
 The value should be the internal id (recommended) or a resource identifier
 (generally dcterms:identifier), but it should be unique in all the database.
 To import a custom vocab value, the header should contain `^^customvocab:xxx`,
-where "xxx" is the identifier of the vocab or its label without punctuation.
+where "xxx" is the identifier of the vocab recommended or its label wrapped with
+`"` or `'`.
 
-Default supported datatypes are the ones managed by omeka:
+Default supported datatypes are the ones managed by Omeka:
 - `literal` (default)
 - `uri`
 - `resource`
@@ -376,10 +419,10 @@ Numeric Data Types) if modules are present:
 - `numeric:timestamp`
 - `numeric:integer`
 - `numeric:duration`
-- `geometry:geography`
-- `geometry:geometry`
-- `customvocab:xxx` (where xxx is the id, or the label without punctuation, but space is allowed)
-- `valuesuggest:xxx`
+- `geography`
+- `geometry`
+- `customvocab:xxx`
+- `valuesuggest:yyy`
 - `html`
 - `xml`
 - `boolean`
@@ -387,15 +430,15 @@ Numeric Data Types) if modules are present:
 The prefixes can be omitted when they are simple: `item`, `itemset`, `media`,
 `timestamp`, `integer`, `duration`, `geography`, `geometry`.
 
-Multiple datatypes can be set for one column, separated with a `;`: `dcterms:relation ^^customvocab:15 ; resource:item ; resource ; literal`.
+Multiple datatypes can be set for one column: `dcterms:relation ^^customvocab:15 ^^resource:item ^^resource ^^literal`.
 The datatype is checked for each value and if it is not valid, the next datatype
 is tried. It is useful when some data are normalized and some not, for example
-with a list of dates or subjects: `dcterms:date ^^numeric:timestamp ; literal`,
-or `dcterms:subject ^^valuesuggest:idref:rameau ; literal`.
+with a list of dates or subjects: `dcterms:date ^^numeric:timestamp ^^literal`,
+or `dcterms:subject ^^valuesuggest:idref:rameau ^^literal`.
 
-To import multiple targets for a column, use the separator "|" in the header.
-Note that if there may be multiple properties, only the first language and type
-will be used for now: `dcterms:creator ^^resource ; literal | foaf:name`.
+To import multiple target destination for a column, use the separator `|` in the
+header. Note that if there may be multiple properties, only the first language and type
+will be used for now: `dcterms:creator ^^resource:item ^^literal | foaf:name`.
 
 The visibility of each data can be "public" (default) or "private", prefixed by `§`.
 
@@ -416,27 +459,46 @@ TODO
 ----
 
 - [ ] See todo in code.
+- [ ] Add more tests.
 - [x] Full dry-run.
 - [ ] Extract list of metadata names during dry-run and output it to help building mapping.
 - [ ] Fix numeric data type (doctrine issue): see fix in https://github.com/omeka-s-modules/NumericDataTypes/pull/29.
-- [ ] Distinction between skipped and blank (for spreadsheet).
+- [ ] Distinction between "skipped" and "blank" for spreadsheet.
 - [ ] Update for module Mapping.
 - [ ] Import of users, in particular for Omeka S import.
 - [x] Import of uri with label in spreadsheet.
-- [ ] Import of uri with label in value suggest.
+- [x] Import of uri with label in value suggest.
 - [ ] Skip import of vocabularies and resource templates for Omeka S import.
 - [ ] Allow to set a query for Omeka S import.
 - [ ] Add check, in particular with multi-sheets.
 - [ ] Manage import of Custom vocab with items.
-- [ ] Convert specific importer into standard resource processor + pattern.
-- [ ] Why are there 752 missing ids with direct sql creation in Spip?
-- [ ] Spip: Utiliser la langue de la rubrique supérieure si pas de langue.
-- [ ] Use transformSource() for sql imports (so convert special processors) or convert rows early (like spreadsheets).
-- [ ] For sql import, use a direct sql queries when mapping is table to table (like eprints statistics).
-- [ ] Count of skipping or empty rows is different during check and real process.
+- [-] Why are there 752 missing ids with direct sql creation in Spip?
+- [-] Spip: Utiliser la langue de la rubrique supérieure si pas de langue.
+- [ ] Use metaMapper() for sql imports (so convert special processors) or convert rows early (like spreadsheets).
+- [x] For sql import, use a direct sql query when mapping is table to table (like eprints statistics).
+- [x] Convert specific importer into standard resource processor + pattern.
+- [x] Deprecate all direct converters that don't use metaMapper() (so upgrade spreadsheet process).
+- [x] Count of skipping or empty rows is different during check and real process.
 - [ ] Check default item set, template and class (they may be not set during creation or update or replace via spreadsheet).
-- [ ] Check a resource with o:item_set[dcterms:title].
+- [ ] Check a resource with `o:item_set[dcterms:title]`.
 - [ ] Add action "error" for unidentified resources.
+- [ ] Divide option "allow duplicate" as "allow missing" and "allow duplicate"?
+- [x] Add import multiple xml files like json.
+- [ ] Show details for mappings: add list of used configuration as importer and as parent/child.
+- [ ] Add automatic determination of the source (csv, file, iiif, multiple iiif, omeka classic, etc.).
+- [ ] Replace internal jsdot by RoNoLo/json-query or binary-cube/dot-array or jasny/dotkey? Probably useless.
+- [ ] Compile jmespath.
+- [ ] Import/update value annotations.
+- [ ] Remove importeds when resource is removed.
+- [ ] Output a one-based index in Entry.
+- [ ] Move option "convert into html" somewhere else.
+- [ ] Normalize config of metadata extraction with metamapper.
+- [ ] Add an automatic mapping for images etc. with xmp.
+- [ ] Manage import params and params.
+- [ ] Rename "params" by "settings" ("settings" is used job, etc.)?
+- [ ] Implement possibility to select identifier names by column (see old target_data).
+- [ ] Reimplement multiple columns for media when importing items, so possibility to set title, etc. for each media in the same line (see old appendRelated()).
+- [ ] Improve global setting for extraction of metadata in manual item edit and in import settings form.
 
 
 Warning
@@ -489,11 +551,13 @@ of the CeCILL license and that you accept its terms.
 
 - Flow.js / Flow php server
 
-  Licence [MIT]
+  License [MIT]
 
 - CodeMirror
 
-  Licence [MIT}
+  License [MIT]
+
+See licenses of other libraries in composer.json.
 
 ### Data
 
@@ -507,31 +571,35 @@ Copyright
 
 * Copyright BibLibre, 2016-2017
 * Copyright Roy Rosenzweig Center for History and New Media, 2015-2018
-* Copyright Daniel Berthereau, 2017-2022 (see [Daniel-KM] on GitLab)
+* Copyright Daniel Berthereau, 2017-2024 (see [Daniel-KM] on GitLab)
 * Copyright (c) 2001-2019, Arnaud Martin, Antoine Pitrou, Philippe Rivière, Emmanuel Saint-James (code from Spip)
 * Copyright 2011-2022, Steffen Fagerström Christensen & alii (libraries [Flow.js] and [flow-php-server])
-* Copyright 2011-2022, Marijn Haverbeke & alii (library [CodeMirror])
+* Copyright 2011-2023, Marijn Haverbeke & alii (library [CodeMirror])
 
 This module was initially inspired by the [Omeka Classic] [Import plugin], built
-by [BibLibre].
+by [BibLibre] and has been built for the future digital library [Manioc] of the
+Université des Antilles and Université de la Guyane, currently managed with
+[Greenstone]. Some other features were built for the future digital library [Le Menestrel]
+and for the institutional repository of student works [Dante] of the [Université de Toulouse Jean-Jaurès].
 
 
 [Bulk Import]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkImport
+[Lisez-moi]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkImport/-/blob/master/LISEZMOI.md
 [Omeka S]: https://omeka.org/s
 [CSV Import]: https://omeka.org/s/modules/CSVImport
 [Omeka Classic]: https://omeka.org/classic
 [Import plugin]: https://github.com/BibLibre/Omeka-plugin-Import
-[size or number of files]: https://github.com/omeka/omeka-s/issues/1785
-[Generic]: https://gitlab.com/Daniel-KM/Omeka-S-module-Generic
+[Common]: https://gitlab.com/Daniel-KM/Omeka-S-module-Common
 [Log]: https://gitlab.com/Daniel-KM/Omeka-S-module-Log
 [BulkImport.zip]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkImport/-/releases
-[installing a module]: http://dev.omeka.org/docs/s/user-manual/modules/#installing-modules
+[installing a module]: https://omeka.org/s/docs/user-manual/modules/#installing-modules
 [CSV Import]: https://github.com/omeka-s-modules/CSVImport
-[this patch]: https://github.com/omeka-s-modules/CSVImport/pull/182
-[this version]: https://gitlab.com/Daniel-KM/Omeka-S-module-CSVImport
-[other patch]: https://github.com/omeka-s-modules/NumericDataTypes/pull/29
-[other version]: https://github.com/Daniel-KM/Omeka-S-module-NumericDataTypes
+[patch]: https://github.com/omeka-s-modules/NumericDataTypes/pull/29
+[version]: https://github.com/Daniel-KM/Omeka-S-module-NumericDataTypes
+[example mapping for Unimarc]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkImport/-/blob/master/data/mapping/xml/unimarc_to_omeka.xml
 [ISO 8601]: https://www.iso.org/iso-8601-date-and-time-format.html
+[JsonPath]: https://goessner.net/articles/JsonPath/index.html
+[JMESPath]: https://jmespath.org
 [Unimarc conversion to Omeka]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkImport/-/blob/master/data/mapping/xml/unimarc_to_omeka.xml
 [Twig]: https://twig.symfony.com/doc/3.x
 [config above]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkImport#config-of-the-mappings
@@ -541,7 +609,6 @@ by [BibLibre].
 [Spip]: https://spip.net
 [data/mappings/fields_to_metadata.php]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkImport/-/blob/master/data/mappings/fields_to_metadata.php
 [Advanced Resource Template]: https://gitlab.com/Daniel-KM/Omeka-S-module-AdvancedResourceTemplate
-[Article]: https://gitlab.com/Daniel-KM/Omeka-S-module-Article
 [Custom Vocab]: https://github.com/Omeka-S-modules/CustomVocab
 [Data Type Rdf]: https://gitlab.com/Daniel-KM/Omeka-S-module-DataTypeRdf
 [Numeric Data Types]: https://github.com/Omeka-S-modules/NumericDataTypes

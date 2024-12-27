@@ -7,9 +7,8 @@ use BulkImport\Entry\BaseEntry;
 use BulkImport\Entry\JsonEntry;
 use BulkImport\Form\Reader\JsonReaderConfigForm;
 use BulkImport\Form\Reader\JsonReaderParamsForm;
-use BulkImport\Traits\TransformSourceTrait;
 use Laminas\Http\Response;
-use Log\Stdlib\PsrMessage;
+use Common\Stdlib\PsrMessage;
 
 /**
  * A full recursive array iterator is useless; it's mainly a paginator. Use yield? AppendGenerator?
@@ -21,12 +20,10 @@ use Log\Stdlib\PsrMessage;
  */
 class JsonReader extends AbstractPaginatedReader
 {
-    use HttpClientTrait;
-    use TransformSourceTrait;
-
     protected $label = 'Json';
     protected $configFormClass = JsonReaderConfigForm::class;
     protected $paramsFormClass = JsonReaderParamsForm::class;
+    protected $entryClass = JsonEntry::class;
 
     protected $configKeys = [
         'url',
@@ -44,6 +41,11 @@ class JsonReader extends AbstractPaginatedReader
     protected $mediaType = 'application/json';
 
     protected $charset = 'utf-8';
+
+    /**
+     * @var string
+     */
+    protected $endpoint;
 
     /**
      * @var ?string
@@ -66,6 +68,8 @@ class JsonReader extends AbstractPaginatedReader
     protected $baseUrl = '';
 
     /**
+     * @todo Use list inside iterator.
+     *
      * @var array
      */
     protected $listFiles = [];
@@ -78,22 +82,50 @@ class JsonReader extends AbstractPaginatedReader
     /**
      * Many endpoints modify path and subpath by type of resources, for example Omeka.
      */
-    public function setPath(?string $path): \BulkImport\Reader\Reader
+    public function setPath(?string $path): self
     {
         $this->path = $path;
         return $this;
     }
 
-    public function setSubPath(?string $subpath): \BulkImport\Reader\Reader
+    public function setSubPath(?string $subpath): self
     {
         $this->subpath = $subpath;
         return $this;
     }
 
-    public function setQueryParams(array $queryParams): \BulkImport\Reader\Reader
+    public function setQueryParams(array $queryParams): self
     {
         $this->queryParams = $queryParams;
         return $this;
+    }
+
+    public function isValid(): bool
+    {
+        $this->initArgs();
+
+        // TODO Check mapping if any (xml, ini, base) (for all readers).
+
+        // TODO Do a early check of each file or url.
+        // Validity will be checked for each file or url.
+        if ($this->listFiles) {
+            return parent::isValid();
+        }
+
+        $message = null;
+        if (empty($this->params['url'])) {
+            if (!$this->bulkFile->isValidEndpoint('', '', [], $this->mediaType, $this->charset, $message)) {
+                $this->lastErrorMessage = $message;
+                return parent::isValid();
+            }
+        } else {
+            if (!$this->bulkFile->isValidDirectUrl($this->params['url'], null, null, $message)) {
+                $this->lastErrorMessage = $message;
+                return parent::isValid();
+            }
+        }
+
+        return parent::isValid();
     }
 
     public function current()
@@ -103,18 +135,19 @@ class JsonReader extends AbstractPaginatedReader
 
         // Sometime, resource data should be sub-fetched: the current data may
         // be incomplete or used only for a quick listing (see content-dm, or
-        // even Omeka for sub-resources).
-        $resourceUrl = $this->transformSourceImportParams['resource_url'] ?? null;
+        // even Omeka for item medias or linked resources).
+        $resourceUrl = $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'resource_url');
         if ($resourceUrl) {
-            $resourceUrl = $this->transformSource
-                ->setVariables($this->transformSourceImportParams)
+            $resourceUrl = $this->metaMapper
+                ->setVariables($this->metaMapper->getMetaMapperConfig()->getSection('params'))
                 ->convertToString('params', 'resource_url', $current);
-            $this->transformSource->addVariable('url_resource', $resourceUrl);
+            $this->metaMapper->setVariable('url_resource', $resourceUrl);
             if (!$this->listFiles) {
-                $current = $this->fetchUrlJson($resourceUrl);
+                $current = $this->bulkFile->fetchUrlJson($resourceUrl);
             }
         }
 
+        // When it is a list of files, the iterator returns a url or a filepath.
         if ($this->listFiles) {
             $content = @file_get_contents($current);
             if ($content === false) {
@@ -122,42 +155,33 @@ class JsonReader extends AbstractPaginatedReader
                     'File "{fileurl}" is not available.', // @translate
                     ['fileurl' => $current]
                 );
-                $this->getServiceLocator()->get('Omeka\Logger')->err(
+                $this->logger->err(
                     $this->lastErrorMessage->getMessage(),
                     $this->lastErrorMessage->getContext()
                 );
-                return new BaseEntry([], $this->key() + $this->isZeroBased, []);
+                return new BaseEntry([], $this->key(), []);
             }
-            $this->transformSource->addVariable('url_resource', $current);
+            if (empty($content)) {
+                $this->lastErrorMessage = new PsrMessage(
+                    'File "{fileurl}" is empty.', // @translate
+                    ['fileurl' => $current]
+                );
+                $this->logger->err(
+                    $this->lastErrorMessage->getMessage(),
+                    $this->lastErrorMessage->getContext()
+                );
+                return new BaseEntry([], $this->key(), []);
+            }
+            $this->metaMapper->setVariable('url_resource', $current);
             $current = json_decode($content, true) ?: [];
         }
 
-        return new JsonEntry($current, $this->key() + $this->isZeroBased, [], [
-            'transformSource' => $this->transformSource,
-        ]);
-    }
-
-    public function isValid(): bool
-    {
-        $this->initArgs();
-
-        // TODO Check mapping if any (xml, ini, base) (for all readers).
-
-        if ($this->listFiles) {
-            return true;
+        $this->currentData = $current ?: null;
+        if ($this->currentData) {
+            return $this->currentEntry();
         }
 
-        if (empty($this->params['url'])) {
-            if (!$this->isValidUrl('', '', [], $this->mediaType, $this->charset)) {
-                return false;
-            }
-        } else {
-            if (!$this->isValidDirectUrl($this->params['url'])) {
-                return false;
-            }
-        }
-
-        return true;
+        return null;
     }
 
     public function rewind(): void
@@ -169,29 +193,37 @@ class JsonReader extends AbstractPaginatedReader
         }
     }
 
-    protected function initArgs(): \BulkImport\Reader\Reader
+    /**
+     * This method is called from the method setResourceName() and isValid().
+     *
+     * @todo Move this reader to a paginated reader or make paginated reader the top reader.
+     * @todo The mapping config is used only to pass config (endpoint, path, subpath, resource_url, resource_root, resource_single, paginationa and other params). But these variables may be dynamic for some sources.
+     * @deprecated Use initializeReader only.
+     */
+    protected function initArgs(): self
     {
-        // Prepare mapper one time.
-        if (isset($this->transformSourceImportParams)) {
+        // Prepare the mapping mapper config.
+        $mappingConfig = $this->getParam('mapping_config')
+            ?: ($this->getConfigParam('mapping_config') ?: null);
+        // TODO Use this resource name ("resources" or "assets" for now). See object type or options?
+        $this->metaMapper->__invoke('resources', $mappingConfig);
+
+        // TODO Check error. See resource processor / prepareMetaConfig().
+        if ($this->metaMapper->getMetaMapperConfig()->hasError()) {
             return $this;
         }
 
-        $mappingConfig = $this->getParam('mapping_config', '') ?: $this->getConfigParam('mapping_config', '');
-        $this->initTransformSource($mappingConfig, $this->params);
+        // FIXME "import params" and "params" are different (import params are dynamic).
 
         // Prepare specific data for the reader.
-        $this->endpoint = empty($this->transformSourceImportParams['endpoint'])
-            ? $this->getParam('url')
-            : $this->transformSourceImportParams['endpoint'];
+        $this->endpoint = $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'endpoint') ?: $this->getParam('url');
+        $this->bulkFile->setEndpoint($this->endpoint);
 
         // To manage complex pagination mechanism, the url can be transformed.
-        if (!empty($this->transformSourceImportParams['path'])) {
-            $this->path = $this->transformSourceImportParams['path'];
-        }
-        if (!empty($this->transformSourceImportParams['subpath'])) {
-            $this->subpath = $this->transformSourceImportParams['subpath'];
-        }
+        $this->path = $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'path') ?: null;
+        $this->subpath = $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'subpath') ?: null;
 
+        // @todo Use a paginated iterator. See XmlReader.
         // Manage a simple list of url/filepath to json.
         $fileList = $this->getParam('list_files');
         if ($fileList) {
@@ -224,9 +256,9 @@ class JsonReader extends AbstractPaginatedReader
         ) {
             $this->lastErrorMessage = new PsrMessage(
                 'Content-type "{content_type}" or charset "{charset}" is invalid for url "{url}".', // @translate
-                ['content_type' => $currentContentType->getMediaType(), 'charset' => $currentContentType->getCharset(), 'url' => $this->lastRequestUrl]
+                ['content_type' => $currentContentType->getMediaType(), 'charset' => $currentContentType->getCharset(), 'url' => $this->bulkFile->getLastRequestUrl()]
             );
-            $this->getServiceLocator()->get('Omeka\Logger')->err(
+            $this->logger->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -238,9 +270,9 @@ class JsonReader extends AbstractPaginatedReader
         if (!$this->currentResponse->isSuccess()) {
             $this->lastErrorMessage = new PsrMessage(
                 'Unable to fetch data for the page {page}, url "{url}".', // @translate
-                ['page' => $this->currentPage, 'url' => $this->lastRequestUrl]
+                ['page' => $this->currentPage, 'url' => $this->bulkFile->getLastRequestUrl()]
             );
-            $this->getServiceLocator()->get('Omeka\Logger')->err(
+            $this->logger->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -254,9 +286,9 @@ class JsonReader extends AbstractPaginatedReader
         if ($json && isset($json['errors']['error'])) {
             $this->lastErrorMessage = new PsrMessage(
                 'Unable to fetch data for the page {page} (url "{url}"): {error}.', // @translate
-                ['page' => $this->currentPage, 'url' => $this->lastRequestUrl, 'error' => $json['errors']['error']]
+                ['page' => $this->currentPage, 'url' => $this->bulkFile->getLastRequestUrl(), 'error' => $json['errors']['error']]
             );
-            $this->getServiceLocator()->get('Omeka\Logger')->err(
+            $this->logger->err(
                 $this->lastErrorMessage->getMessage(),
                 $this->lastErrorMessage->getContext()
             );
@@ -265,11 +297,19 @@ class JsonReader extends AbstractPaginatedReader
             return;
         }
 
-        $resourcesRoot = $this->transformSource->getSectionSetting('params', 'resources_root');
-        $json = $this->transformSource->extractSubValue($json, $resourcesRoot, []);
-        if (!is_array($json)) {
-            $json = [];
+        $resourcesRoot = $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'resources_root');
+        if ($resourcesRoot) {
+            $json = $this->metaMapper->extractSubValue($json, $resourcesRoot, []);
+            if (!is_array($json)) {
+                $json = [];
+            }
         }
+
+        $resourceSingle = $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'resource_single');
+        if ($resourceSingle) {
+            $json = [$json];
+        }
+
         $this->setInnerIterator(new ArrayIterator($json));
     }
 
@@ -315,8 +355,8 @@ class JsonReader extends AbstractPaginatedReader
     protected function fetchData(?string $path = null, ?string $subpath = null, array $params = [], $page = 0): Response
     {
         // TODO Manage pagination query that is not "page".
-        if ($page && !empty($this->transformSourceImportParams['pagination'])) {
-            $vars = $this->transformSourceImportParams;
+        if ($page && $this->metaMapper->getMetaMapperConfig()->getSectionSetting('params', 'pagination')) {
+            $vars = $this->metaMapper->getMetaMapperConfig()->getSection('params');
             $vars['url'] = $this->getParam('url');
             if (!is_null($path)) {
                 $vars['path'] = $path;
@@ -325,7 +365,7 @@ class JsonReader extends AbstractPaginatedReader
                 $vars['subpath'] = $subpath;
             }
             $vars['page'] = $page;
-            $url = $this->transformSource->setVariables($vars)->convertToString('params', 'pagination');
+            $url = $this->metaMapper->setVariables($vars)->convertToString('params', 'pagination', null);
         } else {
             if ($page) {
                 $params['page'] = $page;
@@ -334,6 +374,6 @@ class JsonReader extends AbstractPaginatedReader
                 . (strlen((string) $path) ? '/' . $path : '')
                 . (strlen((string) $subpath) ? '/' . $subpath : '');
         }
-        return $this->fetchUrl($url, $params);
+        return $this->bulkFile->fetchUrl($url, $params);
     }
 }

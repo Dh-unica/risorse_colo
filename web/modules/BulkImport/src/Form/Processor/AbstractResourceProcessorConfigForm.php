@@ -2,22 +2,18 @@
 
 namespace BulkImport\Form\Processor;
 
-use BulkImport\Form\Element as BulkImportElement;
-use BulkImport\Traits\ServiceLocatorAwareTrait;
 use Laminas\Form\Element;
-use Laminas\Form\Fieldset;
 use Laminas\Form\Form;
 use Omeka\Form\Element as OmekaElement;
 
 abstract class AbstractResourceProcessorConfigForm extends Form
 {
-    use ServiceLocatorAwareTrait;
-    use TaskTrait;
-    use EntriesToProcessTrait;
+    use CommonProcessTrait;
 
     public function init(): void
     {
         $this
+            ->setAttribute('id', 'form-bulk-importer')
             ->baseFieldset()
             ->addFieldsets();
 
@@ -26,59 +22,10 @@ abstract class AbstractResourceProcessorConfigForm extends Form
             ->addInputFilter();
     }
 
-    protected function baseFieldset(): \Laminas\Form\Form
+    protected function baseFieldset(): self
     {
-        $services = $this->getServiceLocator();
-        $urlHelper = $services->get('ViewHelperManager')->get('url');
-
         $this
-            ->add([
-                'name' => 'comment',
-                'type' => Element\Text::class,
-                'options' => [
-                    'label' => 'Label or comment', // @translate
-                    'info' => 'This optional comment will help admins for future reference.', // @translate
-                ],
-                'attributes' => [
-                    'id' => 'comment',
-                    'value' => '',
-                    'placeholder' => 'Optional label or comment for future reference.', // @translate
-                ],
-            ])
-
-            ->addTask()
-
-            ->add([
-                'name' => 'processing',
-                'type' => BulkImportElement\OptionalRadio::class,
-                'options' => [
-                    'label' => 'Process control', // @translate
-                    'info' => 'In all cases, the check of identifiers, linked resources, template values, and files presence is done during a first loop.', // @translate
-                    'value_options' => [
-                        'dry_run' => 'Dry run', // @translate
-                        'stop_on_error' => 'Stop on error', // @translate
-                        'continue_on_error' => 'Continue on error', // @translate
-                    ],
-                ],
-                'attributes' => [
-                    'id' => 'processing',
-                    'value' => 'stop_on_error',
-                ],
-            ])
-
-            ->add([
-                'name' => 'value_datatype_literal',
-                'type' => Element\Checkbox::class,
-                'options' => [
-                    'label' => 'Use data type "literal" when a value is invalid', // @translate
-                    'info' => 'The mapping can be used for more precise process with "^^xxx; literal".', // @translate
-                ],
-                'attributes' => [
-                    'id' => 'value_datatype_literal',
-                ],
-            ])
-
-            ->addEntriesToProcess()
+            ->addCommonProcess()
 
             ->add([
                 'name' => 'action',
@@ -115,13 +62,14 @@ abstract class AbstractResourceProcessorConfigForm extends Form
                     'label' => 'Action on unidentified resources', // @translate
                     'info' => 'What to do when a resource to update does not exist.', // @translate
                     'value_options' => [
+                        \BulkImport\Processor\AbstractResourceProcessor::ACTION_ERROR => 'Set error', // @translate
                         \BulkImport\Processor\AbstractProcessor::ACTION_SKIP => 'Skip entry', // @translate
                         \BulkImport\Processor\AbstractProcessor::ACTION_CREATE => 'Create a new resource', // @translate
                     ],
                 ],
                 'attributes' => [
                     'id' => 'action_unidentified',
-                    'value' => \BulkImport\Processor\AbstractProcessor::ACTION_SKIP,
+                    'value' => \BulkImport\Processor\AbstractResourceProcessor::ACTION_ERROR,
                 ],
             ])
 
@@ -147,6 +95,7 @@ abstract class AbstractResourceProcessorConfigForm extends Form
                         ],
                     ],
                     'term_as_value' => true,
+                    // 'used_terms' => true,
                 ],
                 'attributes' => [
                     'id' => 'identifier_name',
@@ -161,11 +110,23 @@ abstract class AbstractResourceProcessorConfigForm extends Form
             ])
 
             ->add([
+                'name' => 'value_datatype_literal',
+                'type' => Element\Checkbox::class,
+                'options' => [
+                    'label' => 'Use data type "literal" when a value is invalid', // @translate
+                    'info' => 'The mapping can be used for automatic and more precise process when specifying data types "^^resource:item ^^literal", for example.', // @translate
+                ],
+                'attributes' => [
+                    'id' => 'value_datatype_literal',
+                ],
+            ])
+
+            ->add([
                 'name' => 'allow_duplicate_identifiers',
                 'type' => Element\Checkbox::class,
                 'options' => [
-                    'label' => 'Allow duplicate identifiers', // @translate
-                    'info' => 'Not recommended, but needed to be compliant with old databases. Duplicates are logged.', // @translate
+                    'label' => 'Allow missing identifiers and duplicate identifiers', // @translate
+                    'info' => 'Not recommended, but needed to be compliant with old databases. Missings and duplicates are logged.', // @translate
                 ],
                 'attributes' => [
                     'id' => 'allow_duplicate_identifiers',
@@ -225,23 +186,16 @@ abstract class AbstractResourceProcessorConfigForm extends Form
 
             ->add([
                 'name' => 'o:resource_template',
-                'type' => OmekaElement\ResourceSelect::class,
+                'type' => OmekaElement\ResourceTemplateSelect::class,
                 'options' => [
                     'label' => 'Resource template', // @translate
                     'empty_option' => '',
-                    'resource_value_options' => [
-                        'resource' => 'resource_templates',
-                        'query' => [],
-                        'option_text_callback' => function ($resourceTemplate) {
-                            return $resourceTemplate->label();
-                        },
-                    ],
+                    'disable_group_by_owner' => true,
                 ],
                 'attributes' => [
                     'id' => 'o-resource-template',
                     'class' => 'chosen-select',
                     'data-placeholder' => 'Select a template…', // @translate
-                    'data-api-base-url' => $urlHelper('api/default', ['resource' => 'resource_templates']),
                 ],
             ])
 
@@ -260,30 +214,7 @@ abstract class AbstractResourceProcessorConfigForm extends Form
                 ],
             ])
 
-            ->add([
-                'name' => 'o:owner',
-                'type' => OmekaElement\ResourceSelect::class,
-                'options' => [
-                    'label' => 'Owner', // @translate
-                    'prepend_value_options' => [
-                        'current' => 'Current user', // @translate
-                    ],
-                    'resource_value_options' => [
-                        'resource' => 'users',
-                        'query' => ['sort_by' => 'name', 'sort_dir' => 'ASC'],
-                        'option_text_callback' => function ($user) {
-                            return sprintf('%s (%s)', $user->name(), $user->email());
-                        },
-                    ],
-                ],
-                'attributes' => [
-                    'id' => 'select-owner',
-                    'value' => 'current',
-                    'class' => 'chosen-select',
-                    'data-placeholder' => 'Select a user', // @translate
-                    'data-api-base-url' => $urlHelper('api/default', ['resource' => 'users'], ['query' => ['sort_by' => 'email', 'sort_dir' => 'ASC']]),
-                ],
-            ])
+            ->addOwner()
 
             ->add([
                 'name' => 'o:is_public',
@@ -304,99 +235,17 @@ abstract class AbstractResourceProcessorConfigForm extends Form
         return $this;
     }
 
-    protected function addFieldsets(): \Laminas\Form\Form
+    protected function addFieldsets(): self
     {
         return $this;
     }
 
-    protected function addMapping(): \Laminas\Form\Form
-    {
-        /** @var \BulkImport\Processor\Processor $processor */
-        $processor = $this->getOption('processor');
-        /** @var \BulkImport\Reader\Reader $reader */
-        $reader = $processor->getReader();
-
-        // Add all columns from file as inputs.
-        $availableFields = $reader->getAvailableFields();
-        if (!count($availableFields)) {
-            return $this;
-        }
-
-        $services = $this->getServiceLocator();
-        /** @var \BulkImport\Mvc\Controller\Plugin\AutomapFields $automapFields */
-        $automapFields = $services->get('ControllerPluginManager')->get('automapFields');
-
-        $this
-            ->add([
-                'name' => 'mapping',
-                'type' => Fieldset::class,
-                'options' => [
-                    'label' => 'Mapping from sources to resources', // @translate
-                ],
-            ]);
-
-        $fieldset = $this->get('mapping');
-
-        $fields = $automapFields($availableFields);
-        $prependedMappingOptions = $this->prependMappingOptions();
-        foreach ($availableFields as $index => $name) {
-            if (!strlen(trim($name))) {
-                continue;
-            }
-            $fieldset
-                ->add([
-                    'name' => $name,
-                    'type' => OmekaElement\PropertySelect::class,
-                    'options' => [
-                        // Fix an issue when a header of a csv file is "0".
-                        'label' => is_numeric($name) && intval($name) === 0 ? "[$name]" : $name,
-                        'term_as_value' => true,
-                        'prepend_value_options' => $prependedMappingOptions,
-                    ],
-                    'attributes' => [
-                        'value' => $fields[$index] ?? null,
-                        'required' => false,
-                        'multiple' => true,
-                        'class' => 'chosen-select',
-                        'data-placeholder' => 'Select one or more targets…', // @translate
-                    ],
-                ]);
-        }
-        return $this;
-    }
-
-    protected function prependMappingOptions(): array
-    {
-        return [
-            // Id is only for update.
-            'o:id' => 'Internal id', // @translate
-            'media_identifier' => [
-                'label' => 'Media identifier', // @translate
-                'options' => [
-                    'o:source' => 'Source', // @translate
-                    'o:filename' => 'File name', // @translate
-                    // When used with module Archive Repertory.
-                    'o:basename' => 'Base file name', // @translate
-                    'o:storage_id' => 'Storage id', // @translate
-                    'o:sha256' => 'Hash', // @translate],
-                ],
-            ],
-            'metadata' => [
-                'label' => 'Resource metadata', // @translate
-                'options' => [
-                    'o:resource_template' => 'Resource template', // @translate
-                    'o:resource_class' => 'Resource class', // @translate
-                    'o:thumbnail' => 'Thumbnail', // @translate
-                    'o:owner' => 'Owner', // @translate
-                    'o:is_public' => 'Visibility public/private', // @translate
-                ],
-            ],
-        ];
-    }
-
-    protected function baseInputFilter(): \Laminas\Form\Form
+    protected function baseInputFilter(): self
     {
         $this
+            ->addCommonProcessInputFilter()
+            ->addOwnerInputFilter()
+
             ->getInputFilter()
             ->add([
                 'name' => 'o:resource_template',
@@ -404,10 +253,6 @@ abstract class AbstractResourceProcessorConfigForm extends Form
             ])
             ->add([
                 'name' => 'o:resource_class',
-                'required' => false,
-            ])
-            ->add([
-                'name' => 'o:owner',
                 'required' => false,
             ])
             ->add([
@@ -442,28 +287,11 @@ abstract class AbstractResourceProcessorConfigForm extends Form
                 'name' => 'allow_duplicate_identifiers',
                 'required' => false,
             ]);
-        return $this
-            ->addEntriesToProcessInputFilter()
-            ->addTaskInputFilter();
-    }
-
-    protected function addInputFilter(): \Laminas\Form\Form
-    {
         return $this;
     }
 
-    protected function addMappingFilter(): \Laminas\Form\Form
+    protected function addInputFilter(): self
     {
-        $inputFilter = $this->getInputFilter();
-        if (!$inputFilter->has('mapping')) {
-            return $this;
-        }
-
-        $inputFilter = $inputFilter->get('mapping');
-        // Change required to false.
-        foreach ($inputFilter->getInputs() as $input) {
-            $input->setRequired(false);
-        }
         return $this;
     }
 
