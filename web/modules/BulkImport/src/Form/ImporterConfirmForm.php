@@ -14,13 +14,12 @@ class ImporterConfirmForm extends Form
     public function init(): void
     {
         $this
-            ->setAttribute('id', 'form-bulk-importer')
             ->add([
-                'name' => 'form_submit',
+                'name' => 'confirm_submit',
                 'type' => Fieldset::class,
             ]);
 
-        $this->get('form_submit')
+        $this->get('confirm_submit')
             ->add([
                 'name' => 'submit',
                 'type' => Element\Submit::class,

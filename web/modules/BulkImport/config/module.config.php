@@ -32,6 +32,9 @@ return [
             // This is an internal ingester.
             'bulk' => Media\Ingester\Bulk::class,
         ],
+        'factories' => [
+            'bulk_upload' => Service\Ingester\BulkUploadFactory::class,
+        ],
     ],
     'view_manager' => [
         'template_path_stack' => [
@@ -42,14 +45,31 @@ return [
             Controller\Admin\ImportController::class => 'bulk/admin/import',
             Controller\Admin\ImporterController::class => 'bulk/admin/importer',
             Controller\Admin\MappingController::class => 'bulk/admin/mapping',
+            Controller\Admin\UploadController::class => 'bulk/admin/upload',
         ],
         'strategies' => [
             'ViewJsonStrategy',
         ],
     ],
+    'view_helpers' => [
+        'factories' => [
+            // Copy from AdvancedResourceTemplate. Copy in BulkExport, BulkEdit and BulkImport. Used in Contribute.
+            'customVocabBaseType' => Service\ViewHelper\CustomVocabBaseTypeFactory::class,
+        ],
+        'delegators' => [
+            'Laminas\Form\View\Helper\FormElement' => [
+                Service\Delegator\FormElementDelegatorFactory::class,
+            ],
+        ],
+    ],
     // TODO Merge the forms.
     'form_elements' => [
         'invokables' => [
+            Form\Element\ArrayText::class => Form\Element\ArrayText::class,
+            Form\Element\OptionalMultiCheckbox::class => Form\Element\OptionalMultiCheckbox::class,
+            Form\Element\OptionalRadio::class => Form\Element\OptionalRadio::class,
+            Form\Element\OptionalSelect::class => Form\Element\OptionalSelect::class,
+            Form\Element\OptionalUrl::class => Form\Element\OptionalUrl::class,
             Form\SettingsFieldset::class => Form\SettingsFieldset::class,
             Form\MappingDeleteForm::class => Form\MappingDeleteForm::class,
             Form\MappingForm::class => Form\MappingForm::class,
@@ -59,11 +79,6 @@ return [
             Form\ImporterConfirmForm::class => Service\Form\FormFactory::class,
             Form\ImporterDeleteForm::class => Service\Form\FormFactory::class,
             Form\ImporterForm::class => Service\Form\FormFactory::class,
-            Form\Mapping\AssetMappingParamsForm::class => Service\Form\FormFactory::class,
-            Form\Mapping\ItemMappingParamsForm::class => Service\Form\FormFactory::class,
-            Form\Mapping\ItemSetMappingParamsForm::class => Service\Form\FormFactory::class,
-            Form\Mapping\MediaMappingParamsForm::class => Service\Form\FormFactory::class,
-            Form\Mapping\ResourceMappingParamsForm::class => Service\Form\FormFactory::class,
             Form\Processor\AssetProcessorConfigForm::class => Service\Form\FormFactory::class,
             Form\Processor\AssetProcessorParamsForm::class => Service\Form\FormFactory::class,
             Form\Processor\EprintsProcessorConfigForm::class => Service\Form\FormFactory::class,
@@ -72,12 +87,16 @@ return [
             Form\Processor\ItemProcessorParamsForm::class => Service\Form\FormFactory::class,
             Form\Processor\ItemSetProcessorConfigForm::class => Service\Form\FormFactory::class,
             Form\Processor\ItemSetProcessorParamsForm::class => Service\Form\FormFactory::class,
+            Form\Processor\ManiocProcessorConfigForm::class => Service\Form\FormFactory::class,
+            Form\Processor\ManiocProcessorParamsForm::class => Service\Form\FormFactory::class,
             Form\Processor\MediaProcessorConfigForm::class => Service\Form\FormFactory::class,
             Form\Processor\MediaProcessorParamsForm::class => Service\Form\FormFactory::class,
             Form\Processor\OmekaSProcessorConfigForm::class => Service\Form\FormFactory::class,
             Form\Processor\OmekaSProcessorParamsForm::class => Service\Form\FormFactory::class,
             Form\Processor\ResourceProcessorConfigForm::class => Service\Form\FormFactory::class,
             Form\Processor\ResourceProcessorParamsForm::class => Service\Form\FormFactory::class,
+            Form\Processor\SpipProcessorConfigForm::class => Service\Form\FormFactory::class,
+            Form\Processor\SpipProcessorParamsForm::class => Service\Form\FormFactory::class,
             Form\Reader\CsvReaderConfigForm::class => Service\Form\FormFactory::class,
             Form\Reader\CsvReaderParamsForm::class => Service\Form\FormFactory::class,
             Form\Reader\JsonReaderConfigForm::class => Service\Form\FormFactory::class,
@@ -95,34 +114,25 @@ return [
         ],
     ],
     'controllers' => [
-        'invokables' => [
-            'BulkImport\Controller\Admin\Mapping' => Controller\Admin\MappingController::class,
-        ],
         'factories' => [
             // Class is not used as key, since it's set dynamically by sub-route
             // and it should be available in acl (so alias is mapped later).
             'BulkImport\Controller\Admin\BulkImport' => Service\Controller\ControllerFactory::class,
             'BulkImport\Controller\Admin\Import' => Service\Controller\ControllerFactory::class,
             'BulkImport\Controller\Admin\Importer' => Service\Controller\ControllerFactory::class,
+            'BulkImport\Controller\Admin\Mapping' => Service\Controller\ControllerFactory::class,
+            'BulkImport\Controller\Admin\Upload' => Service\Controller\UploadControllerFactory::class,
         ],
     ],
     'controller_plugins' => [
         'factories' => [
             'automapFields' => Service\ControllerPlugin\AutomapFieldsFactory::class,
             'bulk' => Service\ControllerPlugin\BulkFactory::class,
-            'bulkCheckLog' => Service\ControllerPlugin\BulkCheckLogFactory::class,
-            'bulkDiffResources' => Service\ControllerPlugin\BulkDiffResourcesFactory::class,
-            'bulkDiffValues' => Service\ControllerPlugin\BulkDiffValuesFactory::class,
-            'bulkFile' => Service\ControllerPlugin\BulkFileFactory::class,
-            'bulkFileUploaded' => Service\ControllerPlugin\BulkFileUploadedFactory::class,
-            'bulkIdentifiers' => Service\ControllerPlugin\BulkIdentifiersFactory::class,
             'diffResources' => Service\ControllerPlugin\DiffResourcesFactory::class,
             'extractDataFromPdf' => Service\ControllerPlugin\ExtractDataFromPdfFactory::class,
             'extractMediaMetadata' => Service\ControllerPlugin\ExtractMediaMetadataFactory::class,
-            'metaMapperConfigList' => Service\ControllerPlugin\MetaMapperConfigListFactory::class,
             Mvc\Controller\Plugin\FindResourcesFromIdentifiers::class => Service\ControllerPlugin\FindResourcesFromIdentifiersFactory::class,
             'processXslt' => Service\ControllerPlugin\ProcessXsltFactory::class,
-            'updateResource' => Service\ControllerPlugin\UpdateResourceFactory::class,
             'updateResourceProperties' => Service\ControllerPlugin\UpdateResourcePropertiesFactory::class,
         ],
         'aliases' => [
@@ -174,6 +184,19 @@ return [
                                     ],
                                 ],
                             ],
+                            'upload' => [
+                                'type' => \Laminas\Router\Http\Segment::class,
+                                'options' => [
+                                    'route' => '/upload[/:action]',
+                                    'constraints' => [
+                                        'action' => 'index|files',
+                                    ],
+                                    'defaults' => [
+                                        'controller' => 'Upload',
+                                        'action' => 'index',
+                                    ],
+                                ],
+                            ],
                         ],
                     ],
                 ],
@@ -219,6 +242,14 @@ return [
                                 'visible' => false,
                             ],
                         ],
+                    ],
+                    [
+                        // Not "Upload" because translation is not good here.
+                        'label' => 'Upload files', // @translate
+                        'route' => 'admin/bulk/upload',
+                        'controller' => 'Upload',
+                        'action' => 'files',
+                        'resource' => 'BulkImport\Controller\Admin\Upload',
                     ],
                     [
                         'label' => 'Configuration', // @translate
@@ -280,7 +311,6 @@ return [
                 ],
             ],
         ],
-        // TODO What are the BulkImport params and logs in navigation?
         'BulkImport' => [
             [
                 'label' => 'Params', // @translate
@@ -310,12 +340,15 @@ return [
     ],
     'bulkimport' => [
         'config' => [
+            'bulkimport_local_path' => OMEKA_PATH . '/files/import',
             'bulkimport_xslt_processor' => '',
             'bulkimport_pdftk' => '',
+            'bulkimport_allow_empty_files' => false,
         ],
         'settings' => [
             'bulkimport_extract_metadata' => false,
             'bulkimport_extract_metadata_log' => false,
+            'bulkimport_convert_html' => [],
         ],
     ],
     'bulk_import' => [
@@ -341,7 +374,9 @@ return [
             Processor\AssetProcessor::class => Processor\AssetProcessor::class,
             // TODO Deprecated these processors and create meta-processor.
             Processor\EprintsProcessor::class => Processor\EprintsProcessor::class,
+            Processor\ManiocProcessor::class => Processor\ManiocProcessor::class,
             Processor\OmekaSProcessor::class => Processor\OmekaSProcessor::class,
+            Processor\SpipProcessor::class => Processor\SpipProcessor::class,
         ],
     ],
 ];

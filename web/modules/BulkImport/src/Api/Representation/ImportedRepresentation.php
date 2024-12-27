@@ -9,11 +9,6 @@ use Omeka\Api\Representation\JobRepresentation;
 
 class ImportedRepresentation extends AbstractEntityRepresentation
 {
-    public function getJsonLdType()
-    {
-        return 'o-bulk:Imported';
-    }
-
     public function getJsonLd()
     {
         return [
@@ -21,6 +16,11 @@ class ImportedRepresentation extends AbstractEntityRepresentation
             'entity_id' => $this->entityId(),
             'entity_name' => $this->entityName(),
         ];
+    }
+
+    public function getJsonLdType()
+    {
+        return 'o-bulk:Imported';
     }
 
     public function job(): JobRepresentation

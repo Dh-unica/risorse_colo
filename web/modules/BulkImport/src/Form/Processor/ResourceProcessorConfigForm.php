@@ -7,7 +7,7 @@ use Omeka\Form\Element as OmekaElement;
 
 class ResourceProcessorConfigForm extends AbstractResourceProcessorConfigForm
 {
-    protected function addFieldsets(): self
+    protected function addFieldsets(): \Laminas\Form\Form
     {
         parent::addFieldsets();
 
@@ -40,7 +40,7 @@ class ResourceProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addFieldsetItem(): self
+    protected function addFieldsetItem(): \Laminas\Form\Form
     {
         $this
             ->add([
@@ -60,7 +60,7 @@ class ResourceProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addFieldsetItemSet(): self
+    protected function addFieldsetItemSet(): \Laminas\Form\Form
     {
         $this
             ->add([
@@ -80,7 +80,7 @@ class ResourceProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addFieldsetMedia(): self
+    protected function addFieldsetMedia(): \Laminas\Form\Form
     {
         $services = $this->getServiceLocator();
         $urlHelper = $services->get('ViewHelperManager')->get('url');
@@ -116,7 +116,7 @@ class ResourceProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addInputFilter(): self
+    protected function addInputFilter(): \Laminas\Form\Form
     {
         parent::addInputFilter();
 
@@ -133,7 +133,7 @@ class ResourceProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addInputFilterItem(): self
+    protected function addInputFilterItem(): \Laminas\Form\Form
     {
         $this->getInputFilter()
             ->add([
@@ -143,7 +143,7 @@ class ResourceProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addInputFilterItemSet(): self
+    protected function addInputFilterItemSet(): \Laminas\Form\Form
     {
         $this->getInputFilter()
             ->add([
@@ -153,7 +153,7 @@ class ResourceProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addInputFilterMedia(): self
+    protected function addInputFilterMedia(): \Laminas\Form\Form
     {
         $this->getInputFilter()
             ->add([

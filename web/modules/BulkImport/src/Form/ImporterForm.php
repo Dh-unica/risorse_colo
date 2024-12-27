@@ -2,10 +2,10 @@
 
 namespace BulkImport\Form;
 
+use BulkImport\Entity\Importer;
 use BulkImport\Processor\Manager as ProcessorManager;
 use BulkImport\Reader\Manager as ReaderManager;
 use BulkImport\Traits\ServiceLocatorAwareTrait;
-use Common\Form\Element as CommonElement;
 use Laminas\Form\Element;
 use Laminas\Form\Fieldset;
 use Laminas\Form\Form;
@@ -14,12 +14,17 @@ class ImporterForm extends Form
 {
     use ServiceLocatorAwareTrait;
 
+    /**
+     * @var Importer
+     */
+    protected $importer;
+
     public function init(): void
     {
         parent::init();
 
         $this
-            ->setAttribute('id', 'form-bulk-importer')
+            ->setAttribute('id', 'bulk-importer-form')
             ->add([
                 'name' => 'o:label',
                 'type' => Element\Text::class,
@@ -28,57 +33,30 @@ class ImporterForm extends Form
                 ],
                 'attributes' => [
                     'id' => 'o-label',
-                    'required' => true,
                 ],
             ])
 
             ->add([
-                'name' => 'o-bulk:reader',
+                'name' => 'o-bulk:reader_class',
                 'type' => Element\Select::class,
                 'options' => [
                     'label' => 'Reader', // @translate
                     'value_options' => $this->getReaderOptions(),
-                    'empty_option' => '',
                 ],
                 'attributes' => [
-                    'id' => 'o-bulk-reader',
-                    'required' => true,
-                    'class' => 'chosen-select',
-                    'data-placeholder' => 'Select a reader…', // @translate
+                    'id' => 'o-bulk-reader-class',
                 ],
             ])
 
             ->add([
-                'name' => 'o-bulk:mapper',
-                'type' => CommonElement\OptionalSelect::class,
-                'options' => [
-                    'label' => 'Mapper', // @translate
-                    'value_options' => [
-                        // 'automatic' => 'Automatic', // @ translate
-                        'manual' => 'Manual', // @translate
-                    ] + $this->getMapperOptions(),
-                    'empty_option' => '',
-                ],
-                'attributes' => [
-                    'id' => 'o-bulk-mapper',
-                    'class' => 'chosen-select',
-                    'data-placeholder' => 'Select a mapper…', // @translate
-                ],
-            ])
-
-            ->add([
-                'name' => 'o-bulk:processor',
+                'name' => 'o-bulk:processor_class',
                 'type' => Element\Select::class,
                 'options' => [
                     'label' => 'Processor', // @translate
                     'value_options' => $this->getProcessorOptions(),
-                    'empty_option' => '',
                 ],
                 'attributes' => [
-                    'id' => 'o-bulk-processor',
-                    'required' => true,
-                    'class' => 'chosen-select',
-                    'data-placeholder' => 'Select a processor…', // @translate
+                    'id' => 'o-bulk-processor-class',
                 ],
             ])
 
@@ -93,26 +71,6 @@ class ImporterForm extends Form
         $fieldset = $this->get('o:config');
         $fieldset
             ->add([
-                'name' => 'importer',
-                'type' => Fieldset::class,
-                'options' => [
-                    'label' => 'Importer', // @translate
-                ],
-            ]);
-        $subFieldset = $fieldset->get('importer');
-        $subFieldset
-            ->add([
-                'name' => 'as_task',
-                'type' => Element\Checkbox::class,
-                'options' => [
-                    'label' => 'Store importer as a task', // @translate
-                    'info' => 'Allows to store a job to run it via command line or a cron task (see module EasyAdmin).', // @translate
-                ],
-                'attributes' => [
-                    'id' => 'as_task',
-                ],
-            ])
-            ->add([
                 'name' => 'notify_end',
                 'type' => Element\Checkbox::class,
                 'options' => [
@@ -121,16 +79,15 @@ class ImporterForm extends Form
                 'attributes' => [
                     'id' => 'notify_end',
                 ],
-            ])
-        ;
+            ]);
 
         $this
             ->add([
-                'name' => 'form_submit',
+                'name' => 'importer_submit',
                 'type' => Fieldset::class,
             ]);
 
-        $this->get('form_submit')
+        $this->get('importer_submit')
             ->add([
                 'name' => 'submit',
                 'type' => Element\Submit::class,
@@ -141,26 +98,21 @@ class ImporterForm extends Form
             ]);
     }
 
-    protected function getReaderOptions(): array
+    public function setImporter(Importer $importer): \Laminas\Form\Form
     {
-        return $this->services->get(ReaderManager::class)
-            ->getRegisteredLabels();
+        $this->importer = $importer;
+        return $this;
     }
 
-    protected function getMapperOptions(): array
+    protected function getReaderOptions(): array
     {
-        /** @var \BulkImport\Mvc\Controller\Plugin\MetaMapperConfigList $metaMapperConfigList */
-        $metaMapperConfigList = $this->services->get('ControllerPluginManager')->get('metaMapperConfigList');
-        return $metaMapperConfigList->listMappings([
-            ['mapping' => true],
-            ['xml' => 'xml'],
-            ['json' => 'ini'],
-        ]);
+        return $this->getServiceLocator()->get(ReaderManager::class)
+            ->getRegisteredLabels();
     }
 
     protected function getProcessorOptions(): array
     {
-        return $this->services->get(ProcessorManager::class)
+        return $this->getServiceLocator()->get(ProcessorManager::class)
             ->getRegisteredLabels();
     }
 }

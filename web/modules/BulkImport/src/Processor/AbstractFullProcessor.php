@@ -22,6 +22,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
     use CountEntitiesTrait;
     use CustomVocabTrait;
     use DateTimeTrait;
+    use FileTrait;
     use InternalIntegrityTrait;
     use LanguageTrait;
     use MappingTrait;
@@ -460,7 +461,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
     /**
      * A list of specific resources to reload when the entity manager is cleared.
      *
-     * @see old SpipProcessor
+     * @see SpipProcessor
      *
      * @var array
      */
@@ -484,9 +485,8 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
     protected $resourceName;
 
     /**
-     * The current resource name.
+     * The current object type (source name).
      *
-     * @deprecated Use resourceName.
      * @var string|null
      */
     protected $objectType;
@@ -558,6 +558,8 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
         $this->currentDateTime = new \DateTime();
         $this->currentDateTimeFormatted = $this->currentDateTime->format('Y-m-d H:i:s');
 
+        $this->initFileTrait();
+
         $settings = $services->get('Omeka\Settings');
         $this->srid = $settings->get('datatypegeometry_locate_srid', 4326);
 
@@ -588,11 +590,11 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
         // Set the template id when a label is used.
         foreach ($this->mapping as $sourceType => $configData) {
             if (isset($configData['resource_template_id'])) {
-                $templateId = $this->easyMeta->resourceTemplateId($configData['resource_template_id']);
+                $templateId = $this->bulk->getResourceTemplateId($configData['resource_template_id']);
                 if ($templateId) {
                     $this->mapping[$sourceType]['resource_template_id'] = $templateId;
                 } else {
-                    $templateId = $this->easyMeta->resourceTemplateId($this->translator->translate($configData['resource_template_id']));
+                    $templateId = $this->bulk->getResourceTemplateId($this->translator->translate($configData['resource_template_id']));
                     if ($templateId) {
                         $this->mapping[$sourceType]['resource_template_id'] = $templateId;
                     }
@@ -1049,7 +1051,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
      */
     protected function prepareInternalVocabularies(): void
     {
-        foreach ($this->easyMeta->propertyIds() as $term => $id) {
+        foreach ($this->bulk->getPropertyIds() as $term => $id) {
             $this->map['properties'][$term] = [
                 'term' => $term,
                 'source' => $id,
@@ -1058,7 +1060,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
         }
         $this->map['by_id']['properties'] = array_map('intval', array_column($this->map['properties'], 'id', 'source'));
 
-        foreach ($this->easyMeta->resourceClassIds() as $term => $id) {
+        foreach ($this->bulk->getResourceClassIds() as $term => $id) {
             $this->map['resource_classes'][$term] = [
                 'term' => $term,
                 'source' => $id,
@@ -1076,7 +1078,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
      */
     protected function prepareInternalTemplates(): void
     {
-        $this->map['resource_templates'] = $this->easyMeta->resourceTemplateIds();
+        $this->map['resource_templates'] = $this->bulk->getResourceTemplateIds();
     }
 
     protected function checkVocabularies(): void
@@ -1379,7 +1381,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
                     $args = [
                         'scheme' => $this->main[$config['main_name']]['item_id'],
                     ];
-                    $this->dispatchJob(\Thesaurus\Job\IndexThesaurus::class, $args);
+                    $this->dispatchJob(\Thesaurus\Job\Indexing::class, $args);
                 }
             }
             $this->logger->notice('Thesaurus reindexed.'); // @translate
@@ -1472,7 +1474,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
                 $this->mapping[$resourceName]['sort_by'] ?? $this->mapping[$resourceName]['key_id'],
                 $this->mapping[$resourceName]['sort_dir'] ?? 'ASC'
             )
-            ->setResourceName($this->mapping[$resourceName]['source']);
+            ->setObjectType($this->mapping[$resourceName]['source']);
     }
 
     /**

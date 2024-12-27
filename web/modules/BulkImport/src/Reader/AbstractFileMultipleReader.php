@@ -3,7 +3,7 @@
 namespace BulkImport\Reader;
 
 use Laminas\Form\Form;
-use Common\Stdlib\PsrMessage;
+use Log\Stdlib\PsrMessage;
 
 /**
  * The multiple files can be uploaded files, a single url or a list of file/url.
@@ -12,6 +12,8 @@ use Common\Stdlib\PsrMessage;
  */
 abstract class AbstractFileMultipleReader extends AbstractReader
 {
+    use FileAndUrlTrait;
+
     /**
      * Local file to process, from uploaded or server file or fetched from url.
      *
@@ -40,12 +42,12 @@ abstract class AbstractFileMultipleReader extends AbstractReader
         }
 
         if ($isUrl) {
-            $filename = $this->bulkFile->fetchUrlToTempFile($url);
+            $filename = $this->fetchUrlToTempFile($url);
             $params['filename'] = $filename;
             unset($params['file']);
             $params['list_files'] = [];
         } else {
-            $file = $this->bulkFile->getUploadedFile($form);
+            $file = $this->getUploadedFile($form);
             if (is_null($file)) {
                 unset($params['file']);
                 $params['list_files'] = $params['list_files']
@@ -83,46 +85,42 @@ abstract class AbstractFileMultipleReader extends AbstractReader
             $file = $this->getParam('file') ?: [];
             // Early check for a single uploaded file.
             $this->currentFilepath = $filepath;
-            if (!$this->bulkFile->isValidFilepath($filepath, $file, null, $this->lastErrorMessage)) {
-                return parent::isValid();
-            }
-            if (!$this->isValidMore()) {
-                return parent::isValid();
-            }
+            return $this->isValidFilepath($filepath, $file)
+                && $this->isValidMore();
         } else {
             $this->listFiles = $this->getParam('list_files') ?: [];
         }
 
         foreach ($this->listFiles as $fileUrl) {
-            if ($this->bulk->isUrl($fileUrl)) {
-                if (!$this->bulkFile->isValidUrl($fileUrl, $this->lastErrorMessage)) {
-                    return parent::isValid();
+            if ($this->isRemote($fileUrl)) {
+                if (!$this->isValidUrl($fileUrl)) {
+                    return false;
                 }
-                $filename = $this->bulkFile->fetchUrlToTempFile($fileUrl);
+                $filename = $this->fetchUrlToTempFile($fileUrl);
                 if (!$filename) {
                     $this->lastErrorMessage = new PsrMessage(
                         'Url "{url}" is invalid, empty or unavailable.', // @translate
                         ['url' => $url]
                     );
-                    return parent::isValid();
+                    return false;
                 }
                 $this->params['filename'] = $filename;
-                if (!$this->bulkFile->isValidFilepath($filename, [], null, $this->lastErrorMessage)) {
-                    return parent::isValid();
+                if (!$this->isValidFilepath($filename)) {
+                    return false;
                 }
             } else {
                 $this->params['filename'] = $fileUrl;
-                if (!$this->bulkFile->isValidFilepath($fileUrl, [], null, $this->lastErrorMessage)) {
-                    return parent::isValid();
+                if (!$this->isValidFilepath($fileUrl)) {
+                    return false;
                 }
             }
             $this->currentFilepath = $this->params['filename'];
             if (!$this->isValidMore()) {
-                return parent::isValid();
+                return false;
             }
         }
 
-        return parent::isValid();
+        return true;
     }
 
     protected function isValidMore(): bool

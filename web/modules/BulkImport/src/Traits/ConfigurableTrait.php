@@ -4,8 +4,14 @@ namespace BulkImport\Traits;
 
 trait ConfigurableTrait
 {
+    /**
+     * @var array
+     */
     protected $config = [];
 
+    /**
+     * @return self
+     */
     public function setConfig(array $config): self
     {
         $this->config = $config;
@@ -17,6 +23,11 @@ trait ConfigurableTrait
         return $this->config;
     }
 
+    /**
+     * @param string $name
+     * @param mixed $default
+     * @return mixed
+     */
     public function getConfigParam($name, $default = null)
     {
         return array_key_exists($name, $this->config)

@@ -20,29 +20,28 @@ $(document).ready(function(){
 });
 </script>
 
-<table id="table-bulk-import" class="tablesaw" data-tablesaw-mode="stack">
+<table class="tablesaw" data-tablesaw-mode="stack">
     <thead>
         <tr>
             <th><?= $escape($translate('Label / Comment')) ?></th>
             <th><?= $escape($translate('Status')) ?></th>
             <th><?= $escape($translate('Process')) ?></th>
-            <th><?= $escape($translate('User')) ?></th>
+            <th><?= $escape($translate('Owner')) ?></th>
         </tr>
     </thead>
     <tbody>
         <?php foreach ($imports as $import):
             $job = $import->job();
             $owner = $job ? $job->owner() : null;
-            $importer = $import->importer();
             ?>
         <tr>
             <td>
                 <?php $comment = $import->comment() ?>
                 <?php if ($comment): ?>
-                <?= $escape($comment) ?>
-                <span class="bulk-label-sub"><?= $importer ? $escape($importer->label()) : '' ?></span>
+                <?= $comment ?>
+                <span class="bulk-label-sub"><?= $import->importer()->label() ?></span>
                 <?php else: ?>
-                <?= $importer ? $escape($importer->label()) : $translate('[Unknown]') ?>
+                <?= $import->importer()->label() ?>
                 <?php endif; ?>
                 <ul class="actions">
                     <?php if ($import->isDryRun()): ?>
@@ -98,7 +97,7 @@ $(document).ready(function(){
                     <?php endif; ?>
                 <?php endif; ?>
             </td>
-            <td><?= $owner ? $hyperlink($owner->name(), $owner->adminUrl()) : '' ?></td>
+            <td><?= $owner ? $hyperlink($owner->name(), $url('admin/id', array('controller' => 'user', 'action' => 'show', 'id' => $owner->id()))) : '' ?></td>
         </tr>
         <?php endforeach; ?>
     </tbody>

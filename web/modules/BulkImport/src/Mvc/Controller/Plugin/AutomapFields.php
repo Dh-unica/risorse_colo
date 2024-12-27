@@ -2,12 +2,10 @@
 
 namespace BulkImport\Mvc\Controller\Plugin;
 
-use Common\Stdlib\EasyMeta;
 use Laminas\Log\Logger;
 use Laminas\Mvc\Controller\Plugin\AbstractPlugin;
 use Omeka\Api\Manager as ApiManager;
 use Omeka\Mvc\Controller\Plugin\Messenger;
-use Omeka\Mvc\Controller\Plugin\Translate;
 
 /**
  * TODO @deprecated Use MetaMapper or MetaMapperConfig.
@@ -85,59 +83,45 @@ class AutomapFields extends AbstractPlugin
         . '#u';
 
     /**
-     * @var \Omeka\Api\Manager
-     */
-    protected $api;
-
-    /**
-     * @var \BulkImport\Mvc\Controller\Plugin\Bulk
-     */
-    protected $bulk;
-
-    /**
-     * @var \Common\Stdlib\EasyMeta
-     */
-    protected $easyMeta;
-
-    /**
-     * @var \Laminas\Log\Logger
-     */
-    protected $logger;
-
-    /**
-     * @var \Omeka\Mvc\Controller\Plugin\Messenger
-     */
-    protected $messenger;
-
-    /**
-     * @var \Omeka\Mvc\Controller\Plugin\Translate
-     */
-    protected $translate;
-
-    /**
      * @var array
      */
     protected $map;
 
     /**
+     * @var ApiManager
+     */
+    protected $api;
+
+    /**
+     * @var Bulk
+     */
+    protected $bulk;
+
+    /**
+     * @var Logger
+     */
+    protected $logger;
+
+    /**
+     * @var Messenger
+     */
+    protected $messenger;
+
+    /**
      * @todo Use messenger only in view and front-end.
      */
     public function __construct(
-        ApiManager $api,
-        Bulk $bulk,
-        EasyMeta $easyMeta,
+        array $map,
         Logger $logger,
         Messenger $messenger,
-        Translate $translate,
-        array $map
+        ApiManager $api,
+        Bulk $bulk
     ) {
-        $this->api = $api;
-        $this->bulk = $bulk;
-        $this->easyMeta = $easyMeta;
+        $this->map = $map;
         $this->logger = $logger;
         $this->messenger = $messenger;
-        $this->translate = $translate;
-        $this->map = $map;
+        $this->api = $api;
+        $this->bulk = $bulk;
     }
 
     /**
@@ -248,18 +232,6 @@ class AutomapFields extends AbstractPlugin
         $automapList = [];
         if ($this->map) {
             $automapList = $this->map;
-            // Add all translations too.
-            foreach ($this->map as $name => $norm) {
-                $translation = $this->translate->__invoke($name);
-                if ($translation !== $name) {
-                    $automapList[$translation] = $norm;
-                }
-                $lowerName = mb_strtolower($name);
-                $translation = $this->translate->__invoke($lowerName);
-                if ($translation !== $lowerName) {
-                    $automapList[$translation] = $norm;
-                }
-            }
             // Add all the defined values as key too.
             $automapList += array_combine($automapList, $automapList);
             $automapLists['base'] = array_combine(
@@ -334,7 +306,7 @@ class AutomapFields extends AbstractPlugin
                             $result['is_public'] = empty($matches['visibility']) ? null : trim($matches['visibility']);
                             $result['pattern'] = empty($matches['pattern']) ? null : trim($matches['pattern']);
                             if ($outputProperty) {
-                                $result['property_id'] = $result['field'] ? $this->easyMeta->propertyId($result['field']) : null;
+                                $result['property_id'] = $result['field'] ? $this->bulk->getPropertyId($result['field']) : null;
                             }
                             $result = $this->appendPattern($result);
                             $automaps[$index][] = $result;
@@ -362,7 +334,7 @@ class AutomapFields extends AbstractPlugin
                             $result['is_public'] = empty($matches['visibility']) ? null : trim($matches['visibility']);
                             $result['pattern'] = empty($matches['pattern']) ? null : trim($matches['pattern']);
                             if ($outputProperty) {
-                                $result['property_id'] = $result['field'] ? $this->easyMeta->propertyId($result['field']) : null;
+                                $result['property_id'] = $result['field'] ? $this->bulk->getPropertyId($result['field']) : null;
                             }
                             $result = $this->appendPattern($result);
                             $automaps[$index][] = $result;
@@ -421,7 +393,7 @@ class AutomapFields extends AbstractPlugin
                     $result['is_public'] = empty($matches['visibility']) ? null : trim($matches['visibility']);
                     $result['pattern'] = empty($matches['pattern']) ? null : trim($matches['pattern']);
                     if ($outputProperty) {
-                        $result['property_id'] = $result['field'] ? $this->easyMeta->propertyId($result['field']) : null;
+                        $result['property_id'] = $result['field'] ? $this->bulk->getPropertyId($result['field']) : null;
                     }
                     $result = $this->appendPattern($result);
                     $automaps[$index][] = $result;
@@ -650,7 +622,7 @@ class AutomapFields extends AbstractPlugin
         }
 
         foreach ($datatypes as &$datatype) {
-            $datatype = $this->bulk->dataTypeName($datatype);
+            $datatype = $this->bulk->getDataTypeName($datatype);
         }
         unset($datatype);
 

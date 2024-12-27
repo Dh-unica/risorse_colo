@@ -7,6 +7,22 @@ use Omeka\Api\Representation\JobRepresentation;
 
 class ImportRepresentation extends AbstractEntityRepresentation
 {
+    public function getJsonLd()
+    {
+        return [
+            'o:id' => $this->id(),
+            'o-bulk:importer' => $this->importer()->getReference(),
+            'o-bulk:comment' => $this->comment(),
+            'o:job' => $this->job(),
+            'o:undo_job' => $this->undoJob(),
+            'o:status' => $this->status(),
+            'o:started' => $this->started(),
+            'o:ended' => $this->ended(),
+            'o-bulk:reader_params' => $this->readerParams(),
+            'o-bulk:processor_params' => $this->processorParams(),
+        ];
+    }
+
     public function getControllerName()
     {
         return 'import';
@@ -15,24 +31,6 @@ class ImportRepresentation extends AbstractEntityRepresentation
     public function getJsonLdType()
     {
         return 'o-bulk:Import';
-    }
-
-    public function getJsonLd()
-    {
-        $importer = $this->importer();
-        $job = $this->job();
-        $undoJob = $this->undoJob();
-        return [
-            'o:id' => $this->id(),
-            'o-bulk:importer' => $importer ? $importer->getReference() : null,
-            'o-bulk:comment' => $this->comment(),
-            'o:job' => $job ? $job->getReference() : null,
-            'o:undo_job' => $undoJob ? $undoJob->getReference() : null,
-            'o:status' => $this->status(),
-            'o:started' => $this->started(),
-            'o:ended' => $this->ended(),
-            'o:params' => $this->params(),
-        ];
     }
 
     public function importer(): ?ImporterRepresentation
@@ -64,79 +62,29 @@ class ImportRepresentation extends AbstractEntityRepresentation
             : null;
     }
 
-    public function params(): array
+    public function readerParams(): ?array
     {
-        return $this->resource->getParams();
-    }
-
-    public function readerParams(): array
-    {
-        $parameters = $this->params();
-        return $parameters['reader'] ?? [];
+        return $this->resource->getReaderParams();
     }
 
     public function readerParam(string $name, $default = null)
     {
-        $parameters = $this->readerParams();
-        return array_key_exists($name, $parameters)
-            ? $parameters[$name]
+        $params = $this->resource->getReaderParams() ?: [];
+        return array_key_exists($name, $params)
+            ? $params[$name]
             : $default;
     }
 
-    public function mapper(): string
+    public function processorParams(): ?array
     {
-        $mapper = $this->importer()->mapper();
-        return in_array((string) $mapper, ['', 'automatic', 'manual'])
-            ? 'import:' . $this->id()
-            : $mapper;
-    }
-
-    public function mapping(): ?array
-    {
-        $metaMapperMapping = $this->importer()->mapping();
-        if ($metaMapperMapping !== null) {
-            return $metaMapperMapping;
-        }
-
-        // Create the manual or automatic mapping from the params.
-        /** @var \BulkImport\Stdlib\MetaMapperConfig $metaMapperConfig */
-        $metaMapperConfig = $this->getServiceLocator()->get('Bulk\MetaMapperConfig');
-        $mapper = $this->mapper();
-        $mappingParams = $this->mappingParams();
-        $processor = $this->importer()->processor();
-        return $metaMapperConfig($mapper, $mappingParams, [
-            'resource_name' => $processor->getResourceName(),
-            'field_types' => $processor->getFieldTypes(),
-            // TODO Temp option waiting for the full manual form outputing right format, not only the term.
-            'is_single_manual' => $this->importer()->mapper() === 'manual',
-        ]);
-    }
-
-    public function mappingParams(): array
-    {
-        $parameters = $this->params();
-        return $parameters['mapping'] ?? [];
-    }
-
-    public function mappingParam(string $name, $default = null)
-    {
-        $parameters = $this->mappingParams();
-        return array_key_exists($name, $parameters)
-            ? $parameters[$name]
-            : $default;
-    }
-
-    public function processorParams(): array
-    {
-        $parameters = $this->params();
-        return $parameters['processor'] ?? [];
+        return $this->resource->getProcessorParams();
     }
 
     public function processorParam(string $name, $default = null)
     {
-        $parameters = $this->processorParams();
-        return array_key_exists($name, $parameters)
-            ? $parameters[$name]
+        $params = $this->resource->getProcessorParams() ?: [];
+        return array_key_exists($name, $params)
+            ? $params[$name]
             : $default;
     }
 

@@ -11,37 +11,34 @@ See [English readme].
 et il est construit pour être extensible. Il permet de gérer des importeurs et
 de traiter l’importation de ressources en lot.
 
-Un import s’effectue en trois étapes :
+De plus, il ajoute un moyen de télécharger manuellement des fichiers en masse
+sans limite de [taille ou nombre de fichiers] dans le formulaire de ressource
+et dans le formulaire séparé pour le téléchargement des fichiers, utilisé pour
+les imports ultérieurs.
 
-- lecture d’une source, qui peut être un fichier, une api, une url, ou une liste
-  d’url ou de fichiers. Le contenu peut être en xml, json, sql ou en tableur.
-- alignement du contenu de la source avec le contenu Omeka. L’alignement peut
-  être manuel, automatique ou préconfiguré. Il peut être enregistré et réutilisé
-  pour d’autres imports.
-- traitement, qui peut être une création ou une mise à jour, selon différents
-  modes, pour diverses ressources (contenus, médias, collections, fichiers, etc.).
+Pour l’importation en masse, le module gère les lecteurs d’une source (xml, sql,
+tableur, url…) et utilise des processeurs pour les importer en tant que
+ressources Omeka et autres données (utilisateurs, modèles…) via des alignements.
 
 Comme plusieurs importeurs peuvent être préparés avec les mêmes lecteurs et
 processeurs, il est possible d’importer plusieurs fois le même type de fichiers
 sans avoir à aligner les données chaque fois.
 
-Les importeurs par défaut sont :
-
-- xml METS et EAD
-- json à partir d’IIIF ou de Content-DM
-- sql
-- tableurs (csv, tsv, ods)
-- Omeka Classic
-- Omeka S
+Les lecteurs par défaut sont le lecteur Omeka S (via l’api json endpoint), xml
+(via transformation avec xslt), sql (pour s’adapter à chaque base de données, un
+exemple pour [e-prints] est fourni), [Spip] (via la base de données), et tableur
+(via ods, tsv ou csv). Le tableur utilise un processeur qui crée des ressources
+sur la base d’un format d’en-tête spécifique, mais sans l’interface manuelle
+comme le module module [CSV Import].
 
 
 Installation
 ------------
 
-Ce module nécessite le module [Log] et [Common]. Un processeur xslt 2 externe
-peut être nécessaire si vous importez des fichiers xml qui ne sont pas
-importables avec xlt 1. Certains lecteurs ou processeurs spécifiques peuvent
-nécessiter d’autres modules.
+Ce module nécessite le module [Log] et optionnellement [Generic]. Un processeur
+xslt 2 externe peut être nécessaire si vous importez des fichiers xml qui ne
+sont pas importables avec xlt 1. Certains lecteurs ou processeurs spécifiques
+peuvent nécessiter d’autres modules.
 
 À partir de la version 3.4.39, le module requiert php 7.4.
 
@@ -357,8 +354,6 @@ afin de récupérer toutes les données annexes.
 Il suffit de sélectionner le lecteur sql et le processeur eprints, puis de
 suivre les instructions.
 
-Cet importeur n’est plus disponible actuellement.
-
 
 Omeka S
 -------
@@ -376,7 +371,10 @@ actuellement pas gérées.
 Spip
 ----
 
-La prise en charge directe de [Spip] a été supprimée dans la version 3.4.55.
+Il suffit de définir les informations d’identification de la base de données et
+l’url et de continuer. Vous devez installer d’autres modules : [Advanced Resource Template],
+[Custom Vocab], [Data Type Rdf], [Numeric Data Types], [Spip ], [Thesaurus],
+[User Profile].
 
 
 Tableur
@@ -494,7 +492,7 @@ TODO
 - [ ] Mise à jour pour le module Mapping.
 - [ ] Importation des utilisateurs, en particulier pour l’importation Omeka S.
 - [x] Importation d’uri avec label dans le tableur.
-- [x] Importation d’uri avec libellé pour Value Suggest.
+- [ ] Importation d’uri avec libellé pour Value Suggest.
 - [ ] Sauter l’import des vocabulaires et des modèles de ressources pour l’import Omeka S.
 - [ ] Permettre de définir une requête pour l’import Omeka S.
 - [ ] Ajouter des vérificains, en particulier avec les tableurs multi-feuilles.
@@ -503,9 +501,9 @@ TODO
 - [-] Spip : Utiliser la langue de la rubrique supérieure si pas de langue.
 - [ ] Utiliser metaMapper() pour les imports sql (donc convertir les processeurs spéciaux) ou convertir les lignes plus tôt (comme les tableurs).
 - [x] Pour les imports sql, utiliser une requête sql directe lorsque l’alignement est de table à table (comme les statistiques eprints).
-- [x] Convertir l’importeur spécifique en processeur de ressources standard + modèle.
-- [x] Dépréciation de tous les convertisseurs directs qui n’utilisent pas metaMapper() (donc mise à jour du processus de feuille de calcul).
-- [x] Le nombre de lignes sautées ou vides est différent pendant la vérification et le processus réel.
+- [ ] Convertir l’importeur spécifique en processeur de ressources standard + modèle.
+- [ ] Dépréciation de tous les convertisseurs directs qui n’utilisent pas metaMapper() (donc mise à jour du processus de feuille de calcul).
+- [ ] Le nombre de lignes sautées ou vides est différent pendant la vérification et le processus réel.
 - [ ] Vérifier le jeu d’éléments, le modèle et la classe par défaut (ils peuvent ne pas être définis lors de la création, de la mise à jour ou du remplacement via le tableur).
 - [ ] Vérifier une ressource avec `o:item_set[dcterms:title]`.
 - [ ] Ajout d’une action "error" pour les ressources non identifiées.
@@ -522,9 +520,6 @@ TODO
 - [ ] Normaliser la config pour extraire les métadonnées avec metamapper.
 - [ ] Ajouter un alignement automatique pour les images etc. avec xmp.
 - [ ] Gérer les paramètres d'import et les paramètres.
-- [ ] Renommer "params" en "settings" ("settings" est utilisé dans job, etc.) ?
-- [ ] Permettre d’utiliser un identifiant specifique par colonne (voir target_data).
-- [ ] Réimplémenter les colonnes multiples pour les media lors de l’import des items et donc possibilité d’indiquer le titre, etc. pour chaque media en une seule ligne (voir ancien appendRelated()).
 
 
 Avertissement
@@ -601,7 +596,7 @@ Copyright
 
 * Copyright BibLibre, 2016-2017
 * Copyright Roy Rosenzweig Center for History and New Media, 2015-2018
-* Copyright Daniel Berthereau, 2017-2024 (voir [Daniel-KM] sur GitLab)
+* Copyright Daniel Berthereau, 2017-2022 (voir [Daniel-KM] sur GitLab)
 * Copyright (c) 2001-2019, Arnaud Martin, Antoine Pitrou, Philippe Rivière, Emmanuel Saint-James (code de Spip)
 * Copyright 2011-2022, Steffen Fagerström Christensen & alii (bibliothèques [Flow.js] et [flow-php-server])
 * Copyright 2011-2023, Marijn Haverbeke & alii (Bibliothèque [CodeMirror])
@@ -620,7 +615,8 @@ l’entrepôt institutionnel des travaux étudiants [Dante] de l’[Université 
 [CSV Import]: https://omeka.org/s/modules/CSVImport
 [Omeka Classic]: https://omeka.org/classic
 [Import plugin]: https://github.com/BibLibre/Omeka-plugin-Import
-[Common]: https://gitlab.com/Daniel-KM/Omeka-S-module-Common
+[taille ou nombre de fichierss]: https://github.com/omeka/omeka-s/issues/1785
+[Generic]: https://gitlab.com/Daniel-KM/Omeka-S-module-Generic
 [Log]: https://gitlab.com/Daniel-KM/Omeka-S-module-Log
 [BulkImport.zip]: https://gitlab.com/Daniel-KM/Omeka-S-module-BulkImport/-/releases
 [installer un module]: https://omeka.org/s/docs/user-manual/modules/#installing-modules

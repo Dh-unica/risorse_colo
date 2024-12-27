@@ -2,6 +2,7 @@
 
 namespace BulkImport\Processor;
 
+use Log\Stdlib\PsrMessage;
 use Omeka\Entity\Resource;
 
 /**
@@ -37,8 +38,8 @@ trait ResourceTrait
         }
 
         $this->sourceKeyId = $keyId;
-        $classId = empty($this->mapping[$sourceType]['resource_class_id']) ? null : $this->easyMeta->resourceClassId($this->mapping[$sourceType]['resource_class_id']);
-        $templateId = empty($this->mapping[$sourceType]['resource_template_id']) ? null : $this->easyMeta->resourceTemplateId($this->mapping[$sourceType]['resource_template_id']);
+        $classId = empty($this->mapping[$sourceType]['resource_class_id']) ? null : $this->bulk->getResourceClassId($this->mapping[$sourceType]['resource_class_id']);
+        $templateId = empty($this->mapping[$sourceType]['resource_template_id']) ? null : $this->bulk->getResourceTemplateId($this->mapping[$sourceType]['resource_template_id']);
         $thumbnailId = $this->mapping[$sourceType]['thumbnail_id'] ?? null;
 
         // Check the size of the import.
@@ -346,7 +347,7 @@ SQL;
         }
     }
 
-    protected function fillResourceObject(array $source): void
+    protected function fillResource(array $source): void
     {
         // Omeka entities are not fluid.
         $this->entity->setOwner($this->userOrDefaultOwner($source['o:owner']));
@@ -732,7 +733,7 @@ SQL;
         if (strpos($value['type'], 'customvocab:') === 0
             && !is_numeric(mb_substr($value['type'], 12))
         ) {
-            $value['type'] = $this->bulk->customVocabDataTypeName($value['type']) ?? 'literal';
+            $value['type'] = $this->bulk->getCustomVocabDataTypeName($value['type']) ?? 'literal';
         }
 
         if (!empty($value['value_resource']) && !is_object($value['value_resource'])) {
@@ -835,11 +836,11 @@ SQL;
         if (empty($values) || empty($termOrId)) {
             return [];
         }
-        $termId = $this->easyMeta->propertyId($termOrId);
+        $termId = $this->bulk->getPropertyId($termOrId);
         if (!$termId) {
             return [];
         }
-        $termLabel = $this->easyMeta->propertyLabel($termId);
+        $termLabel = $this->bulk->getPropertyLabel($termId);
         foreach ($values as &$value) {
             $value['property_id'] = $termId;
             $value['property_label'] = $termLabel;
@@ -884,7 +885,7 @@ SQL;
 
     protected function fillItem(array $source): void
     {
-        $this->fillResourceObject($source);
+        $this->fillResource($source);
 
         $itemSets = $this->entity->getItemSets();
         $itemSetIds = [];
@@ -904,7 +905,7 @@ SQL;
 
     protected function fillMedia(array $source): void
     {
-        $this->fillResourceObject($source);
+        $this->fillResource($source);
 
         $item = $this->entityManager->find(\Omeka\Entity\Item::class, $source['o:item']['o:id']);
         $this->entity->setItem($item);
@@ -919,23 +920,23 @@ SQL;
             $storageId = bin2hex(\Laminas\Math\Rand::getBytes(20));
             $extension = substr($source['o:filename'], $pos + 1);
 
-            $result = $this->bulkFile->fetchAndStore('original', $source['o:source'], $source['o:filename'], $storageId, $extension, $source['o:original_url']);
+            $result = $this->fetchFile('original', $source['o:source'], $source['o:filename'], $storageId, $extension, $source['o:original_url']);
             if ($result['status'] !== 'success') {
                 $this->logger->err($result['message']);
             }
             // Continue in order to update other metadata, in particular item.
             else {
                 if ($source['o:media_type'] !== $result['data']['media_type']) {
-                    $this->logger->err(
+                    $this->logger->err(new PsrMessage(
                         'Media type of media #{id} is different from the original one ({media_type}).', // @translate
                         ['id' => $this->entity->getId(), 'media_type' => $source['o:media_type']]
-                    );
+                    ));
                 }
                 if ($source['o:sha256'] !== $result['data']['sha256']) {
-                    $this->logger->err(
+                    $this->logger->err(new PsrMessage(
                         'Hash of media #{id} is different from the original one.', // @translate
                         ['id' => $this->entity->getId()]
-                    );
+                    ));
                 }
                 $this->entity->setStorageId($storageId);
                 $this->entity->setExtension($extension);
@@ -978,7 +979,7 @@ SQL;
 
     protected function fillItemSet(array $source): void
     {
-        $this->fillResourceObject($source);
+        $this->fillResource($source);
 
         $this->entity->setIsOpen(!empty($source['o:is_open']));
     }

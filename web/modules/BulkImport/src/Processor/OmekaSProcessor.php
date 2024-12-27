@@ -98,7 +98,7 @@ class OmekaSProcessor extends AbstractFullProcessor
         ],
     ];
 
-    protected function fillResourceObject(array $source): void
+    protected function fillResource(array $source): void
     {
         if (!empty($source['o:resource_class']['o:id'])) {
             $originalId = $source['o:resource_class']['o:id'];
@@ -142,7 +142,7 @@ class OmekaSProcessor extends AbstractFullProcessor
             if (!is_array($value) || empty($value)) {
                 continue;
             }
-            $termId = $this->easyMeta->propertyId($term);
+            $termId = $this->bulk->getPropertyId($term);
             if (!$termId) {
                 continue;
             }
@@ -193,7 +193,7 @@ class OmekaSProcessor extends AbstractFullProcessor
             }
         }
 
-        parent::fillResourceObject($source);
+        parent::fillResource($source);
     }
 
     protected function fillItem(array $source): void

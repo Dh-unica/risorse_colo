@@ -2,7 +2,7 @@
 
 namespace BulkImport\Form\Reader;
 
-use Common\Form\Element as CommonElement;
+use BulkImport\Form\Element as BulkImportElement;
 use Laminas\Form\Element;
 
 class OpenDocumentSpreadsheetReaderConfigForm extends AbstractReaderConfigForm
@@ -14,7 +14,7 @@ class OpenDocumentSpreadsheetReaderConfigForm extends AbstractReaderConfigForm
         $this
             ->add([
                 'name' => 'url',
-                'type' => CommonElement\OptionalUrl::class,
+                'type' => BulkImportElement\OptionalUrl::class,
                 'options' => [
                     'label' => 'Spreadsheet url', // @translate
                 ],

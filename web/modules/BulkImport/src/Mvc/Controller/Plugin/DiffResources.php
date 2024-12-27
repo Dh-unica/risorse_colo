@@ -3,13 +3,10 @@
 namespace BulkImport\Mvc\Controller\Plugin;
 
 use BulkImport\Processor\AbstractProcessor;
-use Common\Stdlib\EasyMeta;
 use Laminas\Mvc\Controller\Plugin\AbstractPlugin;
 
 class DiffResources extends AbstractPlugin
 {
-    use BulkResourceTrait;
-
     // TODO Manage other metadata.
     protected $skip = [
         // Internal keys.
@@ -35,9 +32,9 @@ class DiffResources extends AbstractPlugin
     ];
 
     /**
-     * @var \Common\Stdlib\EasyMeta
+     * @var \BulkImport\Mvc\Controller\Plugin\Bulk
      */
-    protected $easyMeta;
+    protected $bulk;
 
     /**
      * @var \BulkImport\Mvc\Controller\Plugin\UpdateResourceProperties
@@ -65,10 +62,10 @@ class DiffResources extends AbstractPlugin
     protected $result;
 
     public function __construct(
-        EasyMeta $easyMeta,
+        Bulk $bulk,
         UpdateResourceProperties $updateResourceProperties
     ) {
-        $this->easyMeta = $easyMeta;
+        $this->bulk = $bulk;
         $this->updateResourceProperties = $updateResourceProperties;
     }
 
@@ -89,11 +86,11 @@ class DiffResources extends AbstractPlugin
 
         $this->resource1 = is_null($resource1) || is_array($resource1)
             ? $resource1
-            : $this->resourceJson($resource1);
+            : $this->bulk->resourceJson($resource1);
 
         $this->resource2 = is_null($resource2) || is_array($resource2)
             ? $resource2
-            : $this->resourceJson($resource2);
+            : $this->bulk->resourceJson($resource2);
 
         // Some of this actions are useless for properties (create), but
         // normally, this helper is not called in that case.
@@ -179,8 +176,6 @@ class DiffResources extends AbstractPlugin
 
         if (!empty($this->resource1['has_error'])
             || !empty($this->resource2['has_error'])
-            || (isset($this->resource1['messageStore']) && $this->resource1['messageStore']->hasErrors)
-            || (isset($this->resource2['messageStore']) && $this->resource2['messageStore']->hasErrors)
         ) {
             $this->result['has_error'] = [
                 'meta' => 'has_error',
@@ -235,7 +230,7 @@ class DiffResources extends AbstractPlugin
 
         // Manage metadata in a generic way.
 
-        $isProperty = is_integer($this->easyMeta->propertyId($meta));
+        $isProperty = is_integer($this->bulk->getPropertyId($meta));
 
         if (!$isProperty) {
             $resultMeta = [
@@ -267,8 +262,8 @@ class DiffResources extends AbstractPlugin
 
         // To diff values requires to have complete, normalized and ordered
         // representation.
-        $dataNorm1 = $data1 ? $this->normalizePropertyValues($meta, $data1) : [];
-        $dataNorm2 = $data2 ? $this->normalizePropertyValues($meta, $data2) : [];
+        $dataNorm1 = $data1 ? $this->bulk->normalizePropertyValues($meta, $data1) : [];
+        $dataNorm2 = $data2 ? $this->bulk->normalizePropertyValues($meta, $data2) : [];
         $data2 = $dataNorm2;
 
         // For properties, the diff depends on the action, so the new data

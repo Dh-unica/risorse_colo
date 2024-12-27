@@ -2,11 +2,10 @@
 
 namespace BulkImport\Reader;
 
-use Laminas\Log\Logger;
 use Laminas\ServiceManager\ServiceLocatorInterface;
 
 /**
- * A reader returns metadata and files data by resource name for the mapper.
+ * A reader returns metadata and files data.
  *
  * It can have a config (implements Configurable) and parameters (implements
  * Parametrizable).
@@ -23,27 +22,24 @@ interface Reader extends \Iterator, \Countable
      */
     public function getLabel(): string;
 
-    public function setLogger(Logger $logger): self;
-
     /**
      * Check if the params of the reader are valid, for example the filepath.
+     *
+     * @return bool
      */
     public function isValid(): bool;
 
     /**
      * Get the last error message, in particular to know why reader is invalid.
      *
-     * @deprecated
-     * @todo Use ErrorStore.
+     * @return string|null
      */
     public function getLastErrorMessage(): ?string;
 
     /**
-     * Set the current resource name to read.
-     *
-     * @param string $resourceName An Omeka api key like items, vocabularies…
+     * @param string $objectType An Omeka api key like "items", "vocabularies"…
      */
-    public function setResourceName(string $resourceName): self;
+    public function setObjectType($objectType): self;
 
     /**
      * Allow to limit results.
@@ -63,7 +59,7 @@ interface Reader extends \Iterator, \Countable
      * It allows to do the mapping in the user interface.
      *
      * Note that these available fields should not be the first output when
-     * `rewind()` is called, in particular for spreadsheet.
+     * `rewind()` is called.
      */
     public function getAvailableFields(): array;
 

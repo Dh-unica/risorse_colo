@@ -24,10 +24,8 @@
 
     function position(e) {
       if (!tt.parentNode) return CodeMirror.off(document, "mousemove", position);
-      var top = Math.max(0, e.clientY - tt.offsetHeight - 5);
-      var left = Math.max(0, Math.min(e.clientX + 5, tt.ownerDocument.defaultView.innerWidth - tt.offsetWidth));
-      tt.style.top = top + "px"
-      tt.style.left = left + "px";
+      tt.style.top = Math.max(0, e.clientY - tt.offsetHeight - 5) + "px";
+      tt.style.left = (e.clientX + 5) + "px";
     }
     CodeMirror.on(document, "mousemove", position);
     position(e);

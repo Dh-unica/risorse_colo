@@ -3,19 +3,19 @@
 namespace BulkImport\Entry;
 
 use ArrayIterator;
-use SimpleXMLElement;
 
 class BaseEntry implements Entry
 {
+    const SIMPLE_DATA = false;
+
+    protected $false = [0, false, '0', 'false', 'no', 'off', 'private', 'closed', 'none'];
+    protected $true = [1, true, '1', 'true', 'yes', 'on', 'public', 'open'];
+    protected $null = [null, 'null'];
+
     /**
      * @var array|\Traversable
      */
     protected $data = [];
-
-    /**
-     * @var SimpleXMLElement
-     */
-    protected $xml;
 
     /**
      * The index is 1-based.
@@ -39,6 +39,11 @@ class BaseEntry implements Entry
      */
     protected $valid;
 
+    /**
+     * @var \BulkImport\Stdlib\MetaMapper|null
+     */
+    protected $metaMapper;
+
     public function __construct($data, int $index, array $fields, array $options = [])
     {
         $this->data = $data;
@@ -50,8 +55,15 @@ class BaseEntry implements Entry
 
     protected function init(): void
     {
-        // The base entry is designed for an array.
-        if (!is_array($this->data)) {
+        if (!empty($this->options['is_formatted'])) {
+            return;
+        }
+
+        if (!empty($this->options['metaMapper'])) {
+            $this->metaMapper = $this->options['metaMapper'];
+        }
+
+        if (is_null($this->data)) {
             $this->data = [];
             return;
         }
@@ -71,13 +83,13 @@ class BaseEntry implements Entry
 
         // Filter duplicated and null values.
         foreach ($this->data as &$datas) {
-            $datas = $datas === null ? [] : array_unique(array_filter($datas, 'strlen'));
+            $datas = is_null($datas) ? [] : array_unique(array_filter($datas, 'strlen'));
         }
     }
 
     public function isEmpty(): bool
     {
-        return !is_array($this->data) || $this->data === [] || !count(array_filter($this->data, function ($v) {
+        return !is_array($this->data) || !count(array_filter($this->data, function ($v) {
             return is_array($v)
                 ? count(array_filter($v, function ($w) {
                     return is_array($w)
@@ -98,9 +110,9 @@ class BaseEntry implements Entry
         return $this->data;
     }
 
-    public function getXmlCopy(): ?SimpleXMLElement
+    public function valuesFromMap(array $map): array
     {
-        return $this->xml;
+        return [];
     }
 
     public function getIterator(): \Traversable

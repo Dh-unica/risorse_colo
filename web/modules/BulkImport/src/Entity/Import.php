@@ -15,7 +15,6 @@ class Import extends AbstractEntity
 {
     /**
      * @var int
-     *
      * @Id
      * @Column(
      *     type="integer"
@@ -38,6 +37,17 @@ class Import extends AbstractEntity
      * )
      */
     protected $importer;
+
+    /**
+     * @var string
+     *
+     * @Column(
+     *     type="string",
+     *     nullable=true,
+     *     length=190
+     * )
+     */
+    protected $comment;
 
     /**
      * @var Job
@@ -66,25 +76,24 @@ class Import extends AbstractEntity
     protected $undoJob;
 
     /**
-     * @var string
+     * @var array
      *
      * @Column(
-     *     type="string",
-     *     nullable=true,
-     *     length=190
+     *     type="json",
+     *     nullable=true
      * )
      */
-    protected $comment;
+    protected $readerParams;
 
     /**
      * @var array
      *
      * @Column(
      *     type="json",
-     *     nullable=false
+     *     nullable=true
      * )
      */
-    protected $params;
+    protected $processorParams;
 
     public function getId()
     {
@@ -100,6 +109,17 @@ class Import extends AbstractEntity
     public function getImporter(): ?Importer
     {
         return $this->importer;
+    }
+
+    public function setComment($comment): self
+    {
+        $this->comment = (string) $comment ?: null;
+        return $this;
+    }
+
+    public function getComment(): ?string
+    {
+        return $this->comment;
     }
 
     public function setJob(?Job $job): self
@@ -124,25 +144,25 @@ class Import extends AbstractEntity
         return $this->undoJob;
     }
 
-    public function setComment($comment): self
+    public function setReaderParams($readerParams): self
     {
-        $this->comment = (string) $comment ?: null;
+        $this->readerParams = $readerParams;
         return $this;
     }
 
-    public function getComment(): ?string
+    public function getReaderParams(): ?array
     {
-        return $this->comment;
+        return $this->readerParams;
     }
 
-    public function setParams(array $params): self
+    public function setProcessorParams(array $processorParams): self
     {
-        $this->params = $params;
+        $this->processorParams = $processorParams;
         return $this;
     }
 
-    public function getParams(): array
+    public function getProcessorParams(): ?array
     {
-        return $this->params;
+        return $this->processorParams;
     }
 }

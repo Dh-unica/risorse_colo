@@ -2,7 +2,8 @@
 
 namespace BulkImport\Form\Processor;
 
-use Common\Form\Element as CommonElement;
+use BulkImport\Form\Element as BulkElement;
+use BulkImport\Traits\ServiceLocatorAwareTrait;
 use Laminas\Form\Element;
 use Omeka\Form\Element as OmekaElement;
 
@@ -15,14 +16,13 @@ class EprintsProcessorParamsForm extends EprintsProcessorConfigForm
     public function init(): void
     {
         $this
-            ->setAttribute('id', 'form-bulk-importer')
             ->baseFieldset();
 
         $this
             ->baseInputFilter();
     }
 
-    protected function baseFieldset(): self
+    protected function baseFieldset(): \Laminas\Form\Form
     {
         $services = $this->getServiceLocator();
         $urlHelper = $services->get('ViewHelperManager')->get('url');
@@ -155,7 +155,7 @@ class EprintsProcessorParamsForm extends EprintsProcessorConfigForm
             ])
             ->add([
                 'name' => 'endpoint',
-                'type' => CommonElement\OptionalUrl::class,
+                'type' => BulkElement\OptionalUrl::class,
                 'options' => [
                     'label' => 'Base url', // @translate
                 ],
@@ -199,7 +199,7 @@ class EprintsProcessorParamsForm extends EprintsProcessorConfigForm
         return $this;
     }
 
-    protected function baseInputFilter(): self
+    protected function baseInputFilter(): \Laminas\Form\Form
     {
         $this->getInputFilter()
             ->add([

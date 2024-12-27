@@ -123,8 +123,6 @@ class MetaMapper
      * @return self
      *
      * @uses \BulkImport\Stdlib\MetaMapperConfig
-     *
-     * @todo Separate metaMapperConfig and metaMapper: prepare the mapping separately and just use one setter to set the result mapping array.
      */
     public function __invoke(?string $mappingName = null, $mappingOrReference = null): self
     {
@@ -184,22 +182,26 @@ class MetaMapper
         return $this->metaMapperConfig->__invoke()->getMapping($this->mappingName);
     }
 
-    /**
-     * Variables are used when the mapping requires dynamic params.
-     *
-     * Some pagination mechanisms are complex and require variables.
-     * Some json endpoints  requires a second level map with a mapped value.
-     */
     public function setVariables(array $variables): self
     {
         $this->variables = $variables;
         return $this;
     }
 
+    public function getVariables(): array
+    {
+        return $this->variables;
+    }
+
     public function setVariable(string $name, $value): self
     {
         $this->variables[$name] = $value;
         return $this;
+    }
+
+    public function getVariable(string $name, $default = null)
+    {
+        return $this->variables[$name] ?? $default;
     }
 
     /**
@@ -252,6 +254,7 @@ class MetaMapper
         }
 
         $result = [];
+
         if (is_array($data)) {
             $result = $this->convertMappingSectionJson('default', $result, $data, true);
             $result = $this->convertMappingSectionJson('maps', $result, $data);
@@ -304,14 +307,14 @@ class MetaMapper
             $raw = $mod['raw'] ?? '';
             $val = $mod['val'] ?? '';
             if (strlen($raw)) {
-                $this->convertFinalize($resource, $to, [$raw]);
+                $resource[$to['dest']] = empty($resource[$to['dest']])
+                    ? [$raw]
+                    : array_merge($resource[$to['dest']], [$raw]);
                 continue;
             }
 
             // @todo When default, "from" is useless: remove it from normalized config.
-            $querier = $fromTo['from']['querier']
-                ?? $this->metaMapperConfig->getSectionSetting('info', 'querier')
-                ?? 'jsdot';
+            $querier = $fromTo['from']['querier'] ?? 'jsdot';
             $fromPath = $fromTo['from']['path'] ?? null;
             $prepend = $mod['prepend'] ?? '';
             $append = $mod['append'] ?? '';
@@ -353,12 +356,9 @@ class MetaMapper
                             : $prepend . $converted . $append;
                     }
                 } else {
-                    if ($querier === 'index') {
-                        $values = $data[$fromPath] ?? [];
-                    }
                     // Check for associative value. "from" is a full path to data:
                     // [key.to.data => "value"]
-                    elseif (array_key_exists($fromPath, $flatData)) {
+                    if (array_key_exists($fromPath, $flatData)) {
                         $values = $flatData[$fromPath];
                     }
                     // Check for a repetitive value, starting with "fields[].".
@@ -376,7 +376,7 @@ class MetaMapper
                             continue;
                         }
                         // Allows to use multiple mappings in one pattern, managing fields.
-                        $source = $querier === 'index' ? [$fromPath => $value] : $flatData;
+                        $source = $flatData;
                         $source[$fromPath] = $value;
                         $converted = $this->convertTargetToStringJson($fromTo['from'], $mod, $source, $querier, true);
                         if ($converted === null || $converted === '') {
@@ -389,7 +389,15 @@ class MetaMapper
                 }
             }
 
-            $this->convertFinalize($resource, $to, $result);
+            if ($result === []) {
+                continue;
+            }
+
+            $result = array_unique($result);
+
+            $resource[$to['dest']] = empty($resource[$to['dest']])
+                ? $result
+                : array_merge($resource[$to['dest']], $result);
         }
 
         return $resource;
@@ -428,12 +436,13 @@ class MetaMapper
                 continue;
             }
 
-            $from = $fromTo['from']['path'] ?? null;
             $mod = $fromTo['mod'] ?? [];
             $raw = $mod['raw'] ?? '';
-
-            if (!$from && strlen($raw)) {
-                $this->convertFinalize($resource, $to, [$raw]);
+            $val = $mod['val'] ?? '';
+            if (strlen($raw)) {
+                $resource[$to['dest']] = empty($resource[$to['dest']])
+                    ? [$raw]
+                    : array_merge($resource[$to['dest']], [$raw]);
                 continue;
             }
 
@@ -441,7 +450,7 @@ class MetaMapper
             // pattern, output as xml in order to get full xml when possible.
             $outputAsXml = !empty($to['datatype']) && reset($to['datatype']) === 'xml';
 
-            $val = $mod['val'] ?? '';
+            $from = $fromTo['from']['path'] ?? null;
             $prepend = $mod['prepend'] ?? '';
             $append = $mod['append'] ?? '';
 
@@ -460,145 +469,27 @@ class MetaMapper
                     continue;
                 }
                 $values = $this->xpathQuery($doc, $from);
-                if (!count($values)) {
-                    continue;
-                }
-                if (strlen($raw)) {
-                    $result[] = $raw;
-                } else {
-                    foreach ($values as $value) {
-                        $converted = $this->convertTargetToStringXml($from, $mod, $doc, $value, true, $outputAsXml);
-                        if ($converted === null || $converted === '') {
-                            continue;
-                        }
-                        $result[] = strlen($val)
-                            ? $val
-                            : $prepend . $converted . $append;
+                foreach ($values as $value) {
+                    $converted = $this->convertTargetToStringXml($from, $mod, $doc, $value, true, $outputAsXml);
+                    if ($converted === null || $converted === '') {
+                        continue;
                     }
+                    $result[] = strlen($val)
+                        ? $val
+                        : $prepend . $converted . $append;
                 }
             }
 
-            $this->convertFinalize($resource, $to, $result);
+            if ($result === []) {
+                continue;
+            }
+
+            $resource[$to['dest']] = empty($resource[$to['dest']])
+                ? $result
+                : array_merge($resource[$to['dest']], $result);
         }
 
         return $resource;
-    }
-
-    /**
-     * Finalize conversion according to the map and append result to resource.
-     *
-     * Whatever the field type is, the output is always an array of that type or
-     * null. In particular, a list allows to manage multiple identifiers.
-     *
-     * When the output type is an array, the key "__value" is appended, except
-     * if the processor output an array directly, in particular for an xml.
-     *
-     * There is no early deduplicate or simplification in order to manage
-     * complex mapping.
-     */
-    protected function convertFinalize(array &$resource, array $to, ?array $result): self
-    {
-        static $translate = null;
-
-        // Do not fill field here: it may be used for advanced update.
-        if ($result === null) {
-            return $this;
-        }
-
-        if ($translate === null) {
-            $translate = [
-                'false' => $this->bulk->translate('false'),
-                'no' => $this->bulk->translate('no'),
-                'off' => $this->bulk->translate('off'),
-                'true' => $this->bulk->translate('true'),
-                'yes' => $this->bulk->translate('yes'),
-                'on' => $this->bulk->translate('on'),
-            ];
-        }
-
-        $result = array_values($result);
-
-        $field = $to['field'];
-        $fieldType = $to['field_type'] ?? null;
-        unset($to['field'], $to['field_type']);
-
-        switch ($fieldType) {
-            default:
-                // Nothing to do: keep result as is (string or array).
-                // In particular for entities, that should be checked.
-                break;
-            case 'skip':
-                return $this;
-            case 'boolean':
-            case 'booleans':
-                $false = ['0', 'false', 'no', 'off', $translate['false'], $translate['no'], $translate['off']];
-                $true = ['1', 'true', 'yes', 'on', $translate['true'], $translate['yes'], $translate['on']];
-                $cleanResult = [];
-                foreach ($result as $value) {
-                    $cleanResult[] = in_array(strtolower((string) $value), $true, true)
-                        ?: (in_array(strtolower((string) $value), $false, true)
-                            ? false
-                            : null);
-                }
-                $result = $cleanResult;
-                break;
-            case 'integer':
-            case 'integers':
-                $result = array_map('intval', $result);
-                break;
-            case 'string':
-            case 'strings':
-                $result = array_map('strval', $result);
-                break;
-            case 'datetime':
-            case 'datetimes':
-                // Date time is designed to fill sql date time (created or
-                // modified), so fill as string.
-                $cleanResult = [];
-                foreach ($result as $value) {
-                    $cleanResult[] = $value
-                        ? substr_replace('0000-00-00 00:00:00', $value, 0, strlen($value))
-                        : null;
-                }
-                $result = $cleanResult;
-                break;
-            case 'array':
-            case 'arrays':
-                // Some processes like xml may prepare an array directly.
-                // In that case, the value is not added as "__value".
-                $cleanResult = [];
-                foreach ($result as $value) {
-                    if (is_array($value)) {
-                        $cleanResult[] = $value + $to;
-                    } else {
-                        $data = $to;
-                        $data['__value'] = $value;
-                        $cleanResult[] = $data;
-                    }
-                }
-                $result = $cleanResult;
-                break;
-        }
-
-        if (empty($resource[$field])) {
-            $resource[$field] = $result;
-        } elseif (!empty($result)) {
-            $resource[$field] = array_merge(array_values($resource[$field]), $result);
-        }
-
-        // Deduplicate early, but revert to keep the last value, that overrides
-        // previous ones.
-        /*
-        if (count($resource[$field]) > 1) {
-            if (gettype(reset($resource[$field])) === 'array') {
-                $resource[$field] = array_values(array_intersect_key($resource[$field], array_unique(array_map('serialize', $resource[$field]))));
-            } else {
-                $resource[$field] = array_unique($resource[$field]);
-            }
-        }
-        */
-
-        return $this;
     }
 
     /**
@@ -621,15 +512,13 @@ class MetaMapper
 
         $querier = is_array($fromToMod) && isset($fromToMod['from']['querier'])
             ? $fromToMod['from']['querier']
-            : $this->metaMapperConfig->getSectionSetting('info', 'querier', 'value');
+            : 'value';
         switch ($querier) {
-            // Value is used for direct conversion.
             default:
                 $querier = 'value';
                 // no break
             case 'value':
                 return $this->convertTargetToStringJson($name, $fromToMod, $data, $querier, true);
-            case 'index':
             case 'jsdot':
             case 'jmespath':
             case 'jsonpath':
@@ -671,7 +560,7 @@ class MetaMapper
      * static value itself.
      * @param array $data The resource from which extract the data, if needed,
      * and any other value.
-     * @param string $querier "jsdot" (default), "jmespath", "jsonpath", "index" or "value".
+     * @param string $querier "jsdot" (default), "jmespath" or "jsonpath".
      * @param bool $atLeastOneReplacement When set, don't return a value when a
      * pattern has no replacement,
      * @return string The converted value. Without pattern, return the key
@@ -695,9 +584,7 @@ class MetaMapper
         $mod = $mod['mod'] ?? $mod;
 
         // Querier is jsdot by default.
-        if ($querier === 'index') {
-            $fromValue = $data[$from];
-        } elseif ($querier === 'jmespath') {
+        if ($querier === 'jmespath') {
             // TODO Check if data for jmespath are cacheable or automatically cached.
             $fromValue = $data && !is_null($from) ? $this->jmesPathEnv->search($from, $data) : null;
         } elseif ($querier === 'jsonpath') {
@@ -757,8 +644,6 @@ class MetaMapper
                         $replace[$wrappedQuery] = $this->jsonPathQuerier->find($query)->getData();
                     } elseif ($querier === 'jsdot') {
                         $replace[$wrappedQuery] = $flatData[$query] ?? '';
-                    } elseif ($querier === 'index') {
-                        $replace[$wrappedQuery] = $data[$query] ?? '';
                     } else {
                         // TODO A value requires an entry as data.
                         $replace[$wrappedQuery] = '';
@@ -1148,7 +1033,7 @@ class MetaMapper
     private function _flatArray(array &$array, array &$flatArray, ?string $keys = null): void
     {
         foreach ($array as $key => $value) {
-            $nKey = str_replace(['.', '\\'], ['\.', '\\\\'], (string) $key);
+            $nKey = str_replace(['.', '\\'], ['\.', '\\\\'], $key);
             if (is_array($value)) {
                 $this->_flatArray($value, $flatArray, $keys . '.' . $nKey);
             } else {
@@ -1157,10 +1042,6 @@ class MetaMapper
         }
     }
 
-    /**
-     * Fields are params used to simplify extraction.
-     * They can be set in params or in data.
-     */
     protected function extractFields(?array $data): array
     {
         if (empty($data)) {

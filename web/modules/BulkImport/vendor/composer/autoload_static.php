@@ -4,7 +4,7 @@
 
 namespace Composer\Autoload;
 
-class ComposerStaticInit4205343d638894f0d415f9af5c18b32b
+class ComposerStaticInit9998669799adae3d77a80c79f6395537
 {
     public static $files = array (
         'b067bc7112e384b61c701452d53a14a8' => __DIR__ . '/..' . '/mtdowling/jmespath.php/src/JmesPath.php',
@@ -17,9 +17,9 @@ class ComposerStaticInit4205343d638894f0d415f9af5c18b32b
             'mikehaertl\\shellcommand\\' => 24,
             'mikehaertl\\pdftk\\' => 17,
         ),
-        'c' => 
+        'P' => 
         array (
-            'cweagans\\Composer\\' => 18,
+            'PhpOffice\\PhpWord\\' => 18,
         ),
         'O' => 
         array (
@@ -59,9 +59,9 @@ class ComposerStaticInit4205343d638894f0d415f9af5c18b32b
         array (
             0 => __DIR__ . '/..' . '/mikehaertl/php-pdftk/src',
         ),
-        'cweagans\\Composer\\' => 
+        'PhpOffice\\PhpWord\\' => 
         array (
-            0 => __DIR__ . '/..' . '/cweagans/composer-patches/src',
+            0 => __DIR__ . '/..' . '/phpoffice/phpword/src/PhpWord',
         ),
         'OpenSpout\\' => 
         array (
@@ -97,6 +97,16 @@ class ComposerStaticInit4205343d638894f0d415f9af5c18b32b
         ),
     );
 
+    public static $prefixesPsr0 = array (
+        'F' => 
+        array (
+            'Flow' => 
+            array (
+                0 => __DIR__ . '/..' . '/flowjs/flow-php-server/src',
+            ),
+        ),
+    );
+
     public static $classMap = array (
         'BufferedFileRead' => __DIR__ . '/..' . '/hakre/xmlreaderiterator/src/BufferedFileRead.php',
         'BufferedFileReaders' => __DIR__ . '/..' . '/hakre/xmlreaderiterator/src/BufferedFileReaders.php',
@@ -127,9 +137,10 @@ class ComposerStaticInit4205343d638894f0d415f9af5c18b32b
     public static function getInitializer(ClassLoader $loader)
     {
         return \Closure::bind(function () use ($loader) {
-            $loader->prefixLengthsPsr4 = ComposerStaticInit4205343d638894f0d415f9af5c18b32b::$prefixLengthsPsr4;
-            $loader->prefixDirsPsr4 = ComposerStaticInit4205343d638894f0d415f9af5c18b32b::$prefixDirsPsr4;
-            $loader->classMap = ComposerStaticInit4205343d638894f0d415f9af5c18b32b::$classMap;
+            $loader->prefixLengthsPsr4 = ComposerStaticInit9998669799adae3d77a80c79f6395537::$prefixLengthsPsr4;
+            $loader->prefixDirsPsr4 = ComposerStaticInit9998669799adae3d77a80c79f6395537::$prefixDirsPsr4;
+            $loader->prefixesPsr0 = ComposerStaticInit9998669799adae3d77a80c79f6395537::$prefixesPsr0;
+            $loader->classMap = ComposerStaticInit9998669799adae3d77a80c79f6395537::$classMap;
 
         }, null, ClassLoader::class);
     }

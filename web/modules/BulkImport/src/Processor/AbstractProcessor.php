@@ -2,11 +2,11 @@
 
 namespace BulkImport\Processor;
 
+use BulkImport\Reader\Reader;
 use BulkImport\Traits\ServiceLocatorAwareTrait;
 use Laminas\Log\Logger;
 use Laminas\ServiceManager\ServiceLocatorInterface;
-use Common\Stdlib\PsrMessage;
-use Omeka\Api\Representation\AbstractEntityRepresentation;
+use Omeka\Job\AbstractJob as Job;
 
 abstract class AbstractProcessor implements Processor
 {
@@ -29,23 +29,19 @@ abstract class AbstractProcessor implements Processor
     /**#@-*/
 
     /**
-     * The resource name to process with this processor.
-     *
-     * @var string
+     * @var Reader
      */
-    protected $resourceName;
+    protected $reader;
 
     /**
-     * @var string
+     * @var Logger
      */
-    protected $resourceLabel;
+    protected $logger;
 
     /**
-     * The resource field types to process mapping.
-     *
-     * @var array
+     * @var Job
      */
-    protected $fieldTypes = [];
+    protected $job;
 
     /**
      * @var \Omeka\Permissions\Acl
@@ -64,7 +60,7 @@ abstract class AbstractProcessor implements Processor
      *
      * @var \Omeka\Api\Manager
      */
-    protected $api;
+    protected $apiManager;
 
     /**
      * @var \BulkImport\Mvc\Controller\Plugin\Bulk
@@ -72,44 +68,9 @@ abstract class AbstractProcessor implements Processor
     protected $bulk;
 
     /**
-     * @var \BulkImport\Mvc\Controller\Plugin\BulkCheckLog
-     */
-    protected $bulkCheckLog;
-
-    /**
-     * @var \BulkImport\Mvc\Controller\Plugin\BulkFile
-     */
-    protected $bulkFile;
-
-    /**
-     * @var \BulkImport\Mvc\Controller\Plugin\BulkFileUploaded
-     */
-    protected $bulkFileUploaded;
-
-    /**
-     * @var \BulkImport\Mvc\Controller\Plugin\BulkIdentifiers
-     */
-    protected $bulkIdentifiers;
-
-    /**
-     * @var \Common\Stdlib\EasyMeta
-     */
-    protected $easyMeta;
-
-    /**
-     * @var Logger
-     */
-    protected $logger;
-
-    /**
      * @var \BulkImport\Stdlib\MetaMapper
      */
     protected $metaMapper;
-
-    /**
-     * @var \Omeka\Settings\Settings
-     */
-    protected $settings;
 
     /**
      * @var \Laminas\Mvc\I18n\Translator
@@ -146,16 +107,6 @@ abstract class AbstractProcessor implements Processor
     protected $isOldOmeka;
 
     /**
-     * @var int
-     */
-    protected $totalErrors;
-
-        /**
-     * @var string|null
-     */
-    protected $lastErrorMessage;
-
-    /**
      * Processor constructor.
      *
      * @param ServiceLocatorInterface $services
@@ -164,20 +115,14 @@ abstract class AbstractProcessor implements Processor
     {
         $this->setServiceLocator($services);
         $this->acl = $services->get('Omeka\Acl');
-        $this->settings = $services->get('Omeka\Settings');
         $this->translator = $services->get('MvcTranslator');
-        $this->api = $services->get('Omeka\ApiManager');
+        $this->apiManager = $services->get('Omeka\ApiManager');
         $this->adapterManager = $services->get('Omeka\ApiAdapterManager');
 
-        $this->easyMeta = $services->get('EasyMeta');
         $this->metaMapper = $services->get('Bulk\MetaMapper');
 
         $plugins = $services->get('ControllerPluginManager');
         $this->bulk = $plugins->get('bulk');
-        $this->bulkCheckLog= $plugins->get('bulkCheckLog');
-        $this->bulkFile = $plugins->get('bulkFile');
-        $this->bulkFileUploaded = $plugins->get('bulkFileUploaded');
-        $this->bulkIdentifiers = $plugins->get('bulkIdentifiers');
 
         $config = $services->get('Config');
         $this->basePath = $config['file_store']['local']['base_path'] ?: (OMEKA_PATH . '/files');
@@ -191,19 +136,15 @@ abstract class AbstractProcessor implements Processor
         $this->isOldOmeka = version_compare(\Omeka\Module::VERSION, '4', '<');
     }
 
-    public function getResourceName(): string
+    public function setReader(Reader $reader): self
     {
-        return $this->resourceName;
+        $this->reader = $reader;
+        return $this;
     }
 
-    public function getLabel(): string
+    public function getReader(): Reader
     {
-        return $this->resourceLabel;
-    }
-
-    public function getFieldTypes(): array
-    {
-        return $this->fieldTypes;
+        return $this->reader;
     }
 
     public function setLogger(Logger $logger): self
@@ -212,32 +153,9 @@ abstract class AbstractProcessor implements Processor
         return $this;
     }
 
-    public function isValid(): bool
+    public function setJob(Job $job): self
     {
-        if (!$this->lastErrorMessage) {
-            return true;
-        } elseif ($this->lastErrorMessage instanceof PsrMessage) {
-            $this->logger->err($this->lastErrorMessage->getMessage(), $this->lastErrorMessage->getContext());
-        } elseif (!is_bool($this->lastErrorMessage)) {
-            $this->logger->err($this->lastErrorMessage);
-        }
-        return false;
-    }
-
-    // TODO Remove these useless methods from here, used to simplify restructuration.
-
-    public function fillResource(array $data, ?int $index = null): ?array
-    {
-        return null;
-    }
-
-    public function checkResource(array $resource): array
-    {
-        return $resource;
-    }
-
-    public function processResource(array $resource): ?AbstractEntityRepresentation
-    {
-        return null;
+        $this->job = $job;
+        return $this;
     }
 }

@@ -6,7 +6,7 @@ use Laminas\Form\Element;
 
 class ItemSetProcessorConfigForm extends AbstractResourceProcessorConfigForm
 {
-    protected function addFieldsets(): self
+    protected function addFieldsets(): \Laminas\Form\Form
     {
         parent::addFieldsets();
 
@@ -28,7 +28,7 @@ class ItemSetProcessorConfigForm extends AbstractResourceProcessorConfigForm
         return $this;
     }
 
-    protected function addInputFilter(): self
+    protected function addInputFilter(): \Laminas\Form\Form
     {
         parent::addInputFilter();
 
