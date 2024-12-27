@@ -4,7 +4,7 @@
 
 namespace Composer\Autoload;
 
-class ComposerStaticInit428288540f3bd8a6248943c81423b65c
+class ComposerStaticInit4205343d638894f0d415f9af5c18b32b
 {
     public static $files = array (
         'b067bc7112e384b61c701452d53a14a8' => __DIR__ . '/..' . '/mtdowling/jmespath.php/src/JmesPath.php',
@@ -17,25 +17,32 @@ class ComposerStaticInit428288540f3bd8a6248943c81423b65c
             'mikehaertl\\shellcommand\\' => 24,
             'mikehaertl\\pdftk\\' => 17,
         ),
-        'P' => 
+        'c' => 
         array (
-            'PhpOffice\\PhpWord\\' => 18,
+            'cweagans\\Composer\\' => 18,
         ),
         'O' => 
         array (
+            'OpenSpout\\' => 10,
             'OomphInc\\ComposerInstallersExtender\\' => 36,
         ),
         'J' => 
         array (
             'JmesPath\\' => 9,
+            'JamesHeinrich\\GetID3\\' => 21,
+        ),
+        'I' => 
+        array (
+            'Iso639p3\\' => 9,
+            'Iso3166p1\\' => 10,
+        ),
+        'F' => 
+        array (
+            'Flow\\JSONPath\\' => 14,
         ),
         'C' => 
         array (
             'Composer\\Installers\\' => 20,
-        ),
-        'B' => 
-        array (
-            'Box\\Spout\\' => 10,
         ),
     );
 
@@ -52,9 +59,13 @@ class ComposerStaticInit428288540f3bd8a6248943c81423b65c
         array (
             0 => __DIR__ . '/..' . '/mikehaertl/php-pdftk/src',
         ),
-        'PhpOffice\\PhpWord\\' => 
+        'cweagans\\Composer\\' => 
         array (
-            0 => __DIR__ . '/..' . '/phpoffice/phpword/src/PhpWord',
+            0 => __DIR__ . '/..' . '/cweagans/composer-patches/src',
+        ),
+        'OpenSpout\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/openspout/openspout/src',
         ),
         'OomphInc\\ComposerInstallersExtender\\' => 
         array (
@@ -64,23 +75,25 @@ class ComposerStaticInit428288540f3bd8a6248943c81423b65c
         array (
             0 => __DIR__ . '/..' . '/mtdowling/jmespath.php/src',
         ),
+        'JamesHeinrich\\GetID3\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/james-heinrich/getid3/src',
+        ),
+        'Iso639p3\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/daniel-km/simple-iso-639-3/src',
+        ),
+        'Iso3166p1\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/daniel-km/simple-iso-3166-1/src',
+        ),
+        'Flow\\JSONPath\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/softcreatr/jsonpath/src',
+        ),
         'Composer\\Installers\\' => 
         array (
             0 => __DIR__ . '/..' . '/composer/installers/src/Composer/Installers',
-        ),
-        'Box\\Spout\\' => 
-        array (
-            0 => __DIR__ . '/..' . '/box/spout/src/Spout',
-        ),
-    );
-
-    public static $prefixesPsr0 = array (
-        'F' => 
-        array (
-            'Flow' => 
-            array (
-                0 => __DIR__ . '/..' . '/flowjs/flow-php-server/src',
-            ),
         ),
     );
 
@@ -114,10 +127,9 @@ class ComposerStaticInit428288540f3bd8a6248943c81423b65c
     public static function getInitializer(ClassLoader $loader)
     {
         return \Closure::bind(function () use ($loader) {
-            $loader->prefixLengthsPsr4 = ComposerStaticInit428288540f3bd8a6248943c81423b65c::$prefixLengthsPsr4;
-            $loader->prefixDirsPsr4 = ComposerStaticInit428288540f3bd8a6248943c81423b65c::$prefixDirsPsr4;
-            $loader->prefixesPsr0 = ComposerStaticInit428288540f3bd8a6248943c81423b65c::$prefixesPsr0;
-            $loader->classMap = ComposerStaticInit428288540f3bd8a6248943c81423b65c::$classMap;
+            $loader->prefixLengthsPsr4 = ComposerStaticInit4205343d638894f0d415f9af5c18b32b::$prefixLengthsPsr4;
+            $loader->prefixDirsPsr4 = ComposerStaticInit4205343d638894f0d415f9af5c18b32b::$prefixDirsPsr4;
+            $loader->classMap = ComposerStaticInit4205343d638894f0d415f9af5c18b32b::$classMap;
 
         }, null, ClassLoader::class);
     }

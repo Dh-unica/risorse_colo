@@ -16,39 +16,62 @@ class ItemProcessor extends ResourceProcessor
 
     protected $paramsFormClass = ItemProcessorParamsForm::class;
 
-    protected function handleFormSpecific(ArrayObject $args, array $values): \BulkImport\Processor\Processor
+    /**
+     * @see \Omeka\Api\Representation\ItemRepresentation
+     *
+     * @var array
+     */
+    protected $fieldTypes = [
+        // Common metadata.
+        'resource_name' => 'string',
+        // "o:id" may be an identifier.
+        'o:id' => 'string',
+        'o:created' => 'datetime',
+        'o:modified' => 'datetime',
+        'o:is_public' => 'boolean',
+        'o:owner' => 'entity',
+        // Alias of "o:owner" here.
+        'o:email' => 'entity',
+        // Generic.
+        'o:resource_template' => 'entity',
+        'o:resource_class' => 'entity',
+        'o:thumbnail' => 'entity',
+        // A common, but special and complex key, so managed in meta config too.
+        'property' => 'arrays',
+        // Item.
+        'o:item_set' => 'entities',
+        // There can be multiple medias, urls, files, etc. for an item.
+        'o:media' => 'entities',
+        'o:lang' => 'strings',
+        'o:ingester' => 'strings',
+        'o:source' => 'strings',
+        'ingest_filename' => 'strings',
+        'ingest_directory' => 'strings',
+        'ingest_url' => 'strings',
+        'html' => 'strings',
+        // Modules.
+        // Module Mapping.
+        // There can be only one mapping zone.
+        'o-module-mapping:bounds' => 'string',
+        'o-module-mapping:marker' => 'strings',
+    ];
+
+    protected function handleFormSpecific(ArrayObject $args, array $values): self
     {
-        $this->handleFormItem($args, $values);
-        return $this;
+        return $this
+            ->handleFormItem($args, $values);
     }
 
-    protected function baseSpecific(ArrayObject $resource): \BulkImport\Processor\Processor
+    protected function prepareBaseEntitySpecific(ArrayObject $resource): self
     {
-        $this->baseItem($resource);
-        return $this;
+        return $this
+            ->prepareBaseResourceCommon($resource)
+            ->prepareBaseItem($resource);
     }
 
-    public function process(): void
+    protected function fillResourceSpecific(ArrayObject $resource, array $data, ?string $mainResourceName = null): self
     {
-        $this->reader->setObjectType('items');
-        parent::process();
-    }
-
-    protected function fillSpecific(ArrayObject $resource, $target, array $values): bool
-    {
-        switch ($target['target']) {
-            case $this->fillItem($resource, $target, $values):
-                return true;
-            default:
-                return false;
-        }
-        return false;
-    }
-
-    protected function checkEntity(ArrayObject $resource): bool
-    {
-        parent::checkEntity($resource);
-        $this->checkItem($resource);
-        return !$resource['messageStore']->hasErrors();
+        return $this
+            ->fillItem($resource, $data);
     }
 }

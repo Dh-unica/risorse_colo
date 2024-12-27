@@ -6,20 +6,23 @@ use BulkImport\Traits\ServiceLocatorAwareTrait;
 use Laminas\Form\Element;
 use Omeka\Form\Element as OmekaElement;
 
+/**
+ * @deprecated Use new mapping features.
+ * @todo Factorize with Manioc, Spip, Eprints, and Omeka S processor.
+ */
 class OmekaSProcessorParamsForm extends OmekaSProcessorConfigForm
 {
-    use ServiceLocatorAwareTrait;
-
     public function init(): void
     {
         $this
+            ->setAttribute('id', 'form-bulk-importer')
             ->baseFieldset();
 
         $this
             ->baseInputFilter();
     }
 
-    protected function baseFieldset(): \Laminas\Form\Form
+    protected function baseFieldset(): self
     {
         $services = $this->getServiceLocator();
         $urlHelper = $services->get('ViewHelperManager')->get('url');
@@ -76,7 +79,7 @@ class OmekaSProcessorParamsForm extends OmekaSProcessorConfigForm
                         // 'vocabularies' => 'Vocabularies', // @translate
                         // 'resource_templates' => 'Resource templates', // @translate
                         // 'custom_vocabs' => 'Custom vocabs', // @translate
-                        'mappings' => 'Mappings', // @translate
+                        'mappings' => 'Mappings / markers', // @translate
                     ],
                 ],
                 'attributes' => [
@@ -98,7 +101,7 @@ class OmekaSProcessorParamsForm extends OmekaSProcessorConfigForm
         return $this;
     }
 
-    protected function baseInputFilter(): \Laminas\Form\Form
+    protected function baseInputFilter(): self
     {
         $this->getInputFilter()
             ->add([

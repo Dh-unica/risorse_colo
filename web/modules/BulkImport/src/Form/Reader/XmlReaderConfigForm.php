@@ -2,28 +2,32 @@
 
 namespace BulkImport\Form\Reader;
 
-use BulkImport\Form\Element as BulkImportElement;
-use BulkImport\Reader\MappingsTrait;
 use BulkImport\Traits\ServiceLocatorAwareTrait;
-use Laminas\Form\Element;
+use Common\Form\Element as CommonElement;
 use Laminas\Form\Form;
+use Omeka\Form\Element as OmekaElement;
 
 class XmlReaderConfigForm extends Form
 {
     use ServiceLocatorAwareTrait;
-    use MappingsTrait;
 
     public function init(): void
     {
-        $xslConfig = $this->listMappings([['xsl' => 'xsl']]);
+        /** @var \BulkImport\Mvc\Controller\Plugin\MetaMapperConfigList $metaMapperConfigList */
+        $metaMapperConfigList = $this->services->get('ControllerPluginManager')->get('metaMapperConfigList');
+
+        $xslConfig = $metaMapperConfigList->listMappings([
+            ['xsl' => 'xsl'],
+        ]);
         $xslConfig['mapping']['label'] = 'Configured xsl'; // @translate
         $xslConfig['user']['label'] = 'User xsl files'; // @translate
         $xslConfig['module']['label'] = 'Module xsl files'; // @translate
 
         $this
+            ->setAttribute('id', 'form-bulk-importer')
             ->add([
                 'name' => 'url',
-                'type' => BulkImportElement\OptionalUrl::class,
+                'type' => CommonElement\OptionalUrl::class,
                 'options' => [
                     'label' => 'XML url', // @translate
                 ],
@@ -33,10 +37,36 @@ class XmlReaderConfigForm extends Form
                 ],
             ])
             ->add([
-                'name' => 'xsl_sheet',
-                'type' => BulkImportElement\OptionalSelect::class,
+                'name' => 'list_files',
+                'type' => OmekaElement\ArrayTextarea::class,
                 'options' => [
-                    'label' => 'XSLT file used to normalize source', // @translate
+                    'label' => 'List of files or urls', // @translate
+                ],
+                'attributes' => [
+                    'id' => 'list_files',
+                    'required' => false,
+                ],
+            ])
+            ->add([
+                'name' => 'xsl_sheet_pre',
+                'type' => CommonElement\OptionalSelect::class,
+                'options' => [
+                    'label' => 'XSLT file used to preprocess xml or normalize source', // @translate
+                    'value_options' => $xslConfig,
+                    'empty_option' => '',
+                ],
+                'attributes' => [
+                    'id' => 'xsl_sheet_pre',
+                    'value' => '',
+                    'class' => 'chosen-select',
+                    'data-placeholder' => 'Select the xsl for transformation…', // @translate
+                ],
+            ])
+            ->add([
+                'name' => 'xsl_sheet',
+                'type' => CommonElement\OptionalSelect::class,
+                'options' => [
+                    'label' => 'XSLT file used to separate resources or normalize source', // @translate
                     'value_options' => $xslConfig,
                     'empty_option' => '',
                 ],
@@ -48,27 +78,19 @@ class XmlReaderConfigForm extends Form
                 ],
             ])
             ->add([
-                'name' => 'mapping_config',
-                'type' => BulkImportElement\OptionalSelect::class,
+                'name' => 'xsl_params',
+                'type' => OmekaElement\ArrayTextarea::class,
                 'options' => [
-                    'label' => 'Mapping to convert source', // @translate
-                    'value_options' => $this->listMappings([['mapping' => true], ['xml' => 'xml'], ['json' => 'ini']]),
-                    'empty_option' => '',
+                    'label' => 'Params to pass to xsl sheets', // @translate
+                    // 'info' => 'Check the xsl sheets or the documentation to know about params.', // @translate
+                    'as_key_value' => true,
                 ],
                 'attributes' => [
-                    'id' => 'mapping_config',
-                    'value' => '',
-                    'class' => 'chosen-select',
-                    'required' => false,
-                    'data-placeholder' => 'Select the mapping for conversion…', // @translate
-                ],
-            ])
-            ->add([
-                'name' => 'mapping_automatic',
-                'type' => Element\Hidden::class,
-                'attributes' => [
-                    'id' => 'mapping_automatic',
-                    'value' => '1',
+                    'id' => 'xsl_params',
+                    'rows' => '6',
+                    'placeholder' => 'basepath = xxx/
+toc_xml = 1
+param_3 = yyy',
                 ],
             ])
         ;

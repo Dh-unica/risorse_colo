@@ -12,6 +12,11 @@ class MappingForm extends Form
         parent::init();
 
         $defaultMapping = <<<'XML'
+<!--
+Sample of mapping for Unimarc.
+XPaths are case sensitive.
+The base of XPaths is the root element used in the separation step.
+-->
 <mapping>
     <map>
         <from xpath="/record/datafield[@tag='200'][@ind1='1']/subfield[@code='a']"/>
@@ -23,6 +28,7 @@ class MappingForm extends Form
 XML;
 
         $this
+            ->setAttribute('id', 'form-bulk-importer-mapping')
             ->add([
                 'name' => 'o:label',
                 'type' => Element\Text::class,
@@ -36,17 +42,16 @@ XML;
             ])
 
             ->add([
-                'name' => 'o-module-bulk:mapping',
+                'name' => 'o-bulk:mapping',
                 'type' => Element\Textarea::class,
                 'options' => [
                     'label' => 'Mapping', // @translate
                 ],
                 'attributes' => [
-                    'id' => 'o-module-bulk-mapping',
+                    'id' => 'o-bulk-mapping',
                     'rows' => 30,
                     'class' => 'codemirror-code',
                     'placeholder' => $defaultMapping,
-                    'value' => $defaultMapping,
                 ],
             ])
 

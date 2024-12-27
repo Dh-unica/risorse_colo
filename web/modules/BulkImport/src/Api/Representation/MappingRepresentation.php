@@ -11,6 +11,11 @@ class MappingRepresentation extends AbstractEntityRepresentation
         return 'mapping';
     }
 
+    public function getJsonLdType()
+    {
+        return 'o-bulk:Mapping';
+    }
+
     public function getJsonLd()
     {
         $owner = $this->owner();
@@ -32,15 +37,10 @@ class MappingRepresentation extends AbstractEntityRepresentation
             'o:id' => $this->id(),
             'o:owner' => $owner ? $owner->getReference() : null,
             'o:label' => $this->label(),
-            'o-module-bulk:mapping' => $this->mapping(),
+            'o-bulk:mapping' => $this->mapping(),
             'o:created' => $created,
             'o:modified' => $modified,
         ];
-    }
-
-    public function getJsonLdType()
-    {
-        return 'o-module-bulk:Mapping';
     }
 
     public function owner(): ?\Omeka\Api\Representation\UserRepresentation

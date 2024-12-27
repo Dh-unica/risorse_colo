@@ -12,6 +12,7 @@ use Omeka\Entity\ItemSet;
 
 /**
  * @todo The processor is only parametrizable currently.
+ * @deprecated Use MetaMapper and convert full processors into standard processors and make a multi-processor for full migration.
  */
 abstract class AbstractFullProcessor extends AbstractProcessor implements Parametrizable
 {
@@ -21,7 +22,6 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
     use CountEntitiesTrait;
     use CustomVocabTrait;
     use DateTimeTrait;
-    use FileTrait;
     use InternalIntegrityTrait;
     use LanguageTrait;
     use MappingTrait;
@@ -460,7 +460,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
     /**
      * A list of specific resources to reload when the entity manager is cleared.
      *
-     * @see SpipProcessor
+     * @see old SpipProcessor
      *
      * @var array
      */
@@ -484,8 +484,9 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
     protected $resourceName;
 
     /**
-     * The current object type (source name).
+     * The current resource name.
      *
+     * @deprecated Use resourceName.
      * @var string|null
      */
     protected $objectType;
@@ -510,7 +511,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
         return $this->paramsFormClass;
     }
 
-    public function handleConfigForm(Form $form)
+    public function handleConfigForm(Form $form): self
     {
         $values = $form->getData();
         $result = array_intersect_key($values, $this->configDefault) + $this->configDefault;
@@ -518,7 +519,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
         return $this;
     }
 
-    public function handleParamsForm(Form $form)
+    public function handleParamsForm(Form $form): self
     {
         $values = $form->getData();
         $result = array_intersect_key($values, $this->paramsDefault) + $this->paramsDefault;
@@ -548,6 +549,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
             $identity = $services->get('ControllerPluginManager')->get('identity');
             $this->owner = $identity();
         } elseif ($ownerIdParam) {
+            // TODO Use getReference() when possible in all the module.
             $this->owner = $this->entityManager->find(\Omeka\Entity\User::class, $ownerIdParam);
         }
         $this->ownerId = $this->owner ? $this->owner->getId() : null;
@@ -555,8 +557,6 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
 
         $this->currentDateTime = new \DateTime();
         $this->currentDateTimeFormatted = $this->currentDateTime->format('Y-m-d H:i:s');
-
-        $this->initFileTrait();
 
         $settings = $services->get('Omeka\Settings');
         $this->srid = $settings->get('datatypegeometry_locate_srid', 4326);
@@ -588,11 +588,11 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
         // Set the template id when a label is used.
         foreach ($this->mapping as $sourceType => $configData) {
             if (isset($configData['resource_template_id'])) {
-                $templateId = $this->bulk->getResourceTemplateId($configData['resource_template_id']);
+                $templateId = $this->easyMeta->resourceTemplateId($configData['resource_template_id']);
                 if ($templateId) {
                     $this->mapping[$sourceType]['resource_template_id'] = $templateId;
                 } else {
-                    $templateId = $this->bulk->getResourceTemplateId($this->translator->translate($configData['resource_template_id']));
+                    $templateId = $this->easyMeta->resourceTemplateId($this->translator->translate($configData['resource_template_id']));
                     if ($templateId) {
                         $this->mapping[$sourceType]['resource_template_id'] = $templateId;
                     }
@@ -1049,7 +1049,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
      */
     protected function prepareInternalVocabularies(): void
     {
-        foreach ($this->bulk->getPropertyIds() as $term => $id) {
+        foreach ($this->easyMeta->propertyIds() as $term => $id) {
             $this->map['properties'][$term] = [
                 'term' => $term,
                 'source' => $id,
@@ -1058,7 +1058,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
         }
         $this->map['by_id']['properties'] = array_map('intval', array_column($this->map['properties'], 'id', 'source'));
 
-        foreach ($this->bulk->getResourceClassIds() as $term => $id) {
+        foreach ($this->easyMeta->resourceClassIds() as $term => $id) {
             $this->map['resource_classes'][$term] = [
                 'term' => $term,
                 'source' => $id,
@@ -1076,7 +1076,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
      */
     protected function prepareInternalTemplates(): void
     {
-        $this->map['resource_templates'] = $this->bulk->getResourceTemplateIds();
+        $this->map['resource_templates'] = $this->easyMeta->resourceTemplateIds();
     }
 
     protected function checkVocabularies(): void
@@ -1379,7 +1379,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
                     $args = [
                         'scheme' => $this->main[$config['main_name']]['item_id'],
                     ];
-                    $this->dispatchJob(\Thesaurus\Job\Indexing::class, $args);
+                    $this->dispatchJob(\Thesaurus\Job\IndexThesaurus::class, $args);
                 }
             }
             $this->logger->notice('Thesaurus reindexed.'); // @translate
@@ -1428,8 +1428,12 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
             ]);
         }
 
+        // TODO Fix issue on value annotation indexing.
         $this->logger->notice('Reindexing full text search. It may take about some minutes to one hour.'); // @translate
-        $this->dispatchJob(\Omeka\Job\IndexFulltextSearch::class);
+        try {
+            $this->dispatchJob(\Omeka\Job\IndexFulltextSearch::class);
+        } catch (\Exception $e) {
+        }
         $this->logger->notice('Full text search reindexed.'); // @translate
 
         // TODO Run derivative files job.
@@ -1447,7 +1451,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
         $dispatcher->dispatch($jobClass, $args, $strategy);
     }
 
-    protected function prepareReader(string $resourceName, bool $clone = false): \BulkImport\Reader\Reader
+    protected function prepareReader(string $resourceName, bool $clone = false): self
     {
         // When no source is set, it means that the reader is disabled.
         // For example, disable processing of items and medias when mediaItems
@@ -1468,7 +1472,7 @@ abstract class AbstractFullProcessor extends AbstractProcessor implements Parame
                 $this->mapping[$resourceName]['sort_by'] ?? $this->mapping[$resourceName]['key_id'],
                 $this->mapping[$resourceName]['sort_dir'] ?? 'ASC'
             )
-            ->setObjectType($this->mapping[$resourceName]['source']);
+            ->setResourceName($this->mapping[$resourceName]['source']);
     }
 
     /**

@@ -16,33 +16,55 @@ class MediaProcessor extends ResourceProcessor
 
     protected $paramsFormClass = MediaProcessorParamsForm::class;
 
-    protected function handleFormSpecific(ArrayObject $args, array $values): \BulkImport\Processor\Processor
+    /**
+     * @see \Omeka\Api\Representation\MediaRepresentation
+     *
+     * @var array
+     */
+    protected $fieldTypes = [
+        // Common metadata.
+        'resource_name' => 'string',
+        // "o:id" may be an identifier.
+        'o:id' => 'string',
+        'o:created' => 'datetime',
+        'o:modified' => 'datetime',
+        'o:is_public' => 'boolean',
+        'o:owner' => 'entity',
+        // Alias of "o:owner" here.
+        'o:email' => 'entity',
+        // Generic.
+        'o:resource_template' => 'entity',
+        'o:resource_class' => 'entity',
+        'o:thumbnail' => 'entity',
+        // A common, but special and complex key, so managed in meta config too.
+        'property' => 'arrays',
+        // Media.
+        'o:item' => 'entity',
+        'o:lang' => 'string',
+        'o:ingester' => 'string',
+        'o:source' => 'string',
+        'ingest_filename' => 'string',
+        'ingest_directory' => 'string',
+        'ingest_url' => 'string',
+        'html' => 'string',
+    ];
+
+    protected function handleFormSpecific(ArrayObject $args, array $values): self
     {
-        $this->handleFormMedia($args, $values);
-        return $this;
+        return $this
+            ->handleFormMedia($args, $values);
     }
 
-    protected function baseSpecific(ArrayObject $resource): \BulkImport\Processor\Processor
+    protected function prepareBaseEntitySpecific(ArrayObject $resource): self
     {
-        $this->baseMedia($resource);
-        return $this;
+        return $this
+            ->prepareBaseResourceCommon($resource)
+            ->prepareBaseMedia($resource);
     }
 
-    protected function fillSpecific(ArrayObject $resource, $target, array $values): bool
+    protected function fillResourceSpecific(ArrayObject $resource, array $data, ?string $mainResourceName = null): self
     {
-        switch ($target['target']) {
-            case $this->fillMedia($resource, $target, $values):
-                return true;
-            default:
-                return false;
-        }
-        return false;
-    }
-
-    protected function checkEntity(ArrayObject $resource): bool
-    {
-        parent::checkEntity($resource);
-        $this->checkMedia($resource);
-        return !$resource['messageStore']->hasErrors();
+        return $this
+            ->fillMedia($resource, $data);
     }
 }

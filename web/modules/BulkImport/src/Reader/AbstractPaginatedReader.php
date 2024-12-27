@@ -6,6 +6,8 @@ use ArrayIterator;
 
 /**
  * A simple and quick paginator, since each source data is read as a whole.
+
+ * @todo Replace with an IteratorIterator or AppendIterator (a iterator can be appended in a foreach loop).
  *
  * A full recursive array iterator is useless; it's mainly a paginator. Use yield? AppendGenerator?
  * TODO Implement Caching ? ArrayAccess, Seekable, Limit, Filter, OuterIterator…? Or only Reader interface?
@@ -88,60 +90,21 @@ abstract class AbstractPaginatedReader extends AbstractReader
      */
     protected $currentResponse;
 
-    public function setObjectType($objectType): \BulkImport\Reader\Reader
+    public function setResourceName(string $resourceName): self
     {
-        $this->objectType = $objectType;
+        $this->resourceName = $resourceName;
+        // TODO Remove object type.
+        $this->objectType = $resourceName;
         $this->initArgs();
         $this->resetIterator();
         $this->preparePageIterator();
         return $this;
     }
 
-    /**
-     * @param iterable $iterator Should be validable and countable too (ArrayIterator).
-     * @return \BulkImport\Reader\AbstractPaginatedReader
-     */
-    protected function setInnerIterator(iterable $iterator)
+    public function isValid(): bool
     {
-        $this->innerIterator = $iterator;
-        return $this;
-    }
-
-    public function getInnerIterator()
-    {
-        return $this->innerIterator;
-    }
-
-    public function count(): int
-    {
-        return (int) $this->totalCount;
-    }
-
-    public function rewind(): void
-    {
-        $this->currentPage = $this->firstPage;
-        $this->currentIndex = 0;
-        $this->getInnerIterator()->rewind();
-        $this->currentPage();
-    }
-
-    /**
-     * Check if the current position is valid.
-     *
-     * This meaning of this method is different in some iterator classes.
-     *
-     * @return bool
-     */
-    public function valid(): bool
-    {
-        if (!$this->isValid) {
-            return false;
-        }
-        $valid = $this->getInnerIterator()->valid();
-        if ($this->currentPage < $this->lastPage) {
-            return true;
-        }
-        return $valid;
+        $this->initArgs();
+        return parent::isValid();
     }
 
     /**
@@ -172,11 +135,36 @@ abstract class AbstractPaginatedReader extends AbstractReader
             : $this->getInnerIterator()->next();
     }
 
-    public function hasNext(): bool
+    public function rewind(): void
     {
-        $inner = $this->getInnerIterator();
-        return $inner->key() + 1 >= $inner->count()
-            || $this->currentPage < $this->lastPage;
+        $this->currentPage = $this->firstPage;
+        $this->currentIndex = 0;
+        $this->getInnerIterator()->rewind();
+        $this->currentPage();
+    }
+
+    /**
+     * Check if the current position is valid.
+     *
+     * This meaning of this method is different in some iterator classes.
+     *
+     * @return bool
+     */
+    public function valid(): bool
+    {
+        if (!$this->isValid) {
+            return false;
+        }
+        $valid = $this->getInnerIterator()->valid();
+        if ($this->currentPage < $this->lastPage) {
+            return true;
+        }
+        return $valid;
+    }
+
+    public function count(): int
+    {
+        return (int) $this->totalCount;
     }
 
     public function getArrayCopy(): array
@@ -188,21 +176,47 @@ abstract class AbstractPaginatedReader extends AbstractReader
         return $array;
     }
 
-    public function jsonSerialize()
+    public function jsonSerialize(): array
     {
         return $this->getArrayCopy();
     }
 
-    public function isValid(): bool
+    public function hasNext(): bool
     {
-        $this->initArgs();
-        return true;
+        $inner = $this->getInnerIterator();
+        return $inner->key() + 1 >= $inner->count()
+            || $this->currentPage < $this->lastPage;
+    }
+
+    public function getInnerIterator()
+    {
+        return $this->innerIterator;
     }
 
     /**
-     * This method is called from the method setObjectType() and isValid().
+     * @todo Merge with method initArgs().
      */
-    protected function initArgs(): \BulkImport\Reader\Reader
+    protected function initializeReader(): self
+    {
+        return $this;
+    }
+
+    /**
+     * @param iterable $iterator Should be validable and countable too (ArrayIterator).
+     * @return \BulkImport\Reader\AbstractPaginatedReader
+     */
+    protected function setInnerIterator(iterable $iterator)
+    {
+        $this->innerIterator = $iterator;
+        return $this;
+    }
+
+    /**
+     * This method is called from the method setResourceName() and isValid().
+     *
+     * @todo Use method initializeReader().
+     */
+    protected function initArgs(): self
     {
         return $this;
     }

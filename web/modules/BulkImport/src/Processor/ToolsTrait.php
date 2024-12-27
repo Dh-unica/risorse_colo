@@ -233,8 +233,8 @@ SQL;
         }
 
         $entityIds = $this->connection
-            ->query("SELECT `id` FROM `$table` ORDER BY `id`;")
-            ->fetchAll(\PDO::FETCH_COLUMN);
+            ->query("SELECT `id` FROM `$table` ORDER BY `id` ASC;")
+            ->fetchFirstColumn();
         $entityIds = array_map('intval', $entityIds);
 
         if ($isAlreadyFilled) {

@@ -2,28 +2,27 @@
 
 namespace BulkImport\Form\Processor;
 
-use BulkImport\Form\Element as BulkElement;
-use BulkImport\Traits\ServiceLocatorAwareTrait;
+use Common\Form\Element as CommonElement;
 use Laminas\Form\Element;
 use Omeka\Form\Element as OmekaElement;
 
 /**
- * @todo Factorize with Manioc processor.
+ * @deprecated Use new mapping features.
+ * @todo Factorize with Manioc, Spip, Eprints, and Omeka S processor.
  */
 class EprintsProcessorParamsForm extends EprintsProcessorConfigForm
 {
-    use ServiceLocatorAwareTrait;
-
     public function init(): void
     {
         $this
+            ->setAttribute('id', 'form-bulk-importer')
             ->baseFieldset();
 
         $this
             ->baseInputFilter();
     }
 
-    protected function baseFieldset(): \Laminas\Form\Form
+    protected function baseFieldset(): self
     {
         $services = $this->getServiceLocator();
         $urlHelper = $services->get('ViewHelperManager')->get('url');
@@ -156,7 +155,7 @@ class EprintsProcessorParamsForm extends EprintsProcessorConfigForm
             ])
             ->add([
                 'name' => 'endpoint',
-                'type' => BulkElement\OptionalUrl::class,
+                'type' => CommonElement\OptionalUrl::class,
                 'options' => [
                     'label' => 'Base url', // @translate
                 ],
@@ -200,7 +199,7 @@ class EprintsProcessorParamsForm extends EprintsProcessorConfigForm
         return $this;
     }
 
-    protected function baseInputFilter(): \Laminas\Form\Form
+    protected function baseInputFilter(): self
     {
         $this->getInputFilter()
             ->add([

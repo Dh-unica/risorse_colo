@@ -2,7 +2,6 @@
 
 namespace BulkImport\Processor;
 
-use Log\Stdlib\PsrMessage;
 use Omeka\Entity\Resource;
 
 /**
@@ -38,8 +37,8 @@ trait ResourceTrait
         }
 
         $this->sourceKeyId = $keyId;
-        $classId = empty($this->mapping[$sourceType]['resource_class_id']) ? null : $this->bulk->getResourceClassId($this->mapping[$sourceType]['resource_class_id']);
-        $templateId = empty($this->mapping[$sourceType]['resource_template_id']) ? null : $this->bulk->getResourceTemplateId($this->mapping[$sourceType]['resource_template_id']);
+        $classId = empty($this->mapping[$sourceType]['resource_class_id']) ? null : $this->easyMeta->resourceClassId($this->mapping[$sourceType]['resource_class_id']);
+        $templateId = empty($this->mapping[$sourceType]['resource_template_id']) ? null : $this->easyMeta->resourceTemplateId($this->mapping[$sourceType]['resource_template_id']);
         $thumbnailId = $this->mapping[$sourceType]['thumbnail_id'] ?? null;
 
         // Check the size of the import.
@@ -347,7 +346,7 @@ SQL;
         }
     }
 
-    protected function fillResource(array $source): void
+    protected function fillResourceObject(array $source): void
     {
         // Omeka entities are not fluid.
         $this->entity->setOwner($this->userOrDefaultOwner($source['o:owner']));
@@ -464,7 +463,7 @@ SQL;
                             }
                             $datatype = 'literal';
                             $value['type'] = 'literal';
-                            $toInstall = 'Data Type Rdf / Numeric Data Types';
+                            $toInstall = 'Numeric Data Types';
                             break;
                         case 'xsd:date':
                         case 'xsd:dateTime':
@@ -487,7 +486,7 @@ SQL;
                             }
                             $datatype = 'literal';
                             $value['type'] = 'literal';
-                            $toInstall = 'Data Type Rdf / Numeric Data Types';
+                            $toInstall = 'Numeric Data Types';
                             break;
                         case 'xsd:decimal':
                         case 'xsd:gDay':
@@ -495,8 +494,17 @@ SQL;
                         case 'xsd:gMonthDay':
                         case 'xsd:time':
                         // Module DataTypeGeometry.
+                        case 'geography':
+                        case 'geometry':
+                        case 'geography:coordinates':
+                        case 'geometry:coordinates':
+                        case 'geometry:position':
+                        // Deprecated.
                         case 'geometry:geography':
+                        case 'geometry:geography:coordinates':
                         case 'geometry:geometry':
+                        case 'geometry:geometry:coordinates':
+                        case 'geometry:geometry:position':
                             $datatype = 'literal';
                             $value['type'] = 'literal';
                             $toInstall = 'Data Type Geometry';
@@ -593,8 +601,26 @@ SQL;
                         $datatypeAdapter->setEntityValues($dataValue, $entityValue);
                         $this->entityManager->persist($dataValue);
                         break;
+                    // Deprecated Geometry data types.
                     case 'geometry:geography':
+                    case 'geometry:geography:coordinates':
                     case 'geometry:geometry':
+                    case 'geometry:geometry:coordinates':
+                    case 'geometry:geometry:position':
+                        $mapGeometry = [
+                            'geometry:geography' => 'geography',
+                            'geometry:geography:coordinates' => 'geography:coordinates',
+                            'geometry:geometry' => 'geometry',
+                            'geometry:geometry:coordinates' => 'geometry:coordinates',
+                            'geometry:geometry:position' => 'geometry:position',
+                        ];
+                        $datatype = $mapGeometry[$datatype];
+                        // No break.
+                    case 'geography':
+                    case 'geography:coordinates':
+                    case 'geometry':
+                    case 'geometry:coordinates':
+                    case 'geometry:position':
                         $datatypeAdapter = $this->datatypeManager->get($datatype);
                         $class = $datatypeAdapter->getEntityClass();
                         $dataValue = new $class;
@@ -602,7 +628,7 @@ SQL;
                         $dataValue->setProperty($property);
                         $dataValueValue = $datatypeAdapter->getGeometryFromValue($valueValue);
                         if ($this->srid
-                            && $datatype === 'geometry:geography'
+                            && strpos($datatype, 'geography') !== false
                             && empty($dataValueValue->getSrid())
                         ) {
                             $dataValueValue->setSrid($this->srid);
@@ -706,7 +732,7 @@ SQL;
         if (strpos($value['type'], 'customvocab:') === 0
             && !is_numeric(mb_substr($value['type'], 12))
         ) {
-            $value['type'] = $this->bulk->getCustomVocabDataTypeName($value['type']) ?? 'literal';
+            $value['type'] = $this->bulk->customVocabDataTypeName($value['type']) ?? 'literal';
         }
 
         if (!empty($value['value_resource']) && !is_object($value['value_resource'])) {
@@ -809,11 +835,11 @@ SQL;
         if (empty($values) || empty($termOrId)) {
             return [];
         }
-        $termId = $this->bulk->getPropertyId($termOrId);
+        $termId = $this->easyMeta->propertyId($termOrId);
         if (!$termId) {
             return [];
         }
-        $termLabel = $this->bulk->getPropertyLabel($termId);
+        $termLabel = $this->easyMeta->propertyLabel($termId);
         foreach ($values as &$value) {
             $value['property_id'] = $termId;
             $value['property_label'] = $termLabel;
@@ -858,7 +884,7 @@ SQL;
 
     protected function fillItem(array $source): void
     {
-        $this->fillResource($source);
+        $this->fillResourceObject($source);
 
         $itemSets = $this->entity->getItemSets();
         $itemSetIds = [];
@@ -878,7 +904,7 @@ SQL;
 
     protected function fillMedia(array $source): void
     {
-        $this->fillResource($source);
+        $this->fillResourceObject($source);
 
         $item = $this->entityManager->find(\Omeka\Entity\Item::class, $source['o:item']['o:id']);
         $this->entity->setItem($item);
@@ -893,23 +919,23 @@ SQL;
             $storageId = bin2hex(\Laminas\Math\Rand::getBytes(20));
             $extension = substr($source['o:filename'], $pos + 1);
 
-            $result = $this->fetchFile('original', $source['o:source'], $source['o:filename'], $storageId, $extension, $source['o:original_url']);
+            $result = $this->bulkFile->fetchAndStore('original', $source['o:source'], $source['o:filename'], $storageId, $extension, $source['o:original_url']);
             if ($result['status'] !== 'success') {
                 $this->logger->err($result['message']);
             }
             // Continue in order to update other metadata, in particular item.
             else {
                 if ($source['o:media_type'] !== $result['data']['media_type']) {
-                    $this->logger->err(new PsrMessage(
+                    $this->logger->err(
                         'Media type of media #{id} is different from the original one ({media_type}).', // @translate
                         ['id' => $this->entity->getId(), 'media_type' => $source['o:media_type']]
-                    ));
+                    );
                 }
                 if ($source['o:sha256'] !== $result['data']['sha256']) {
-                    $this->logger->err(new PsrMessage(
+                    $this->logger->err(
                         'Hash of media #{id} is different from the original one.', // @translate
                         ['id' => $this->entity->getId()]
-                    ));
+                    );
                 }
                 $this->entity->setStorageId($storageId);
                 $this->entity->setExtension($extension);
@@ -952,7 +978,7 @@ SQL;
 
     protected function fillItemSet(array $source): void
     {
-        $this->fillResource($source);
+        $this->fillResourceObject($source);
 
         $this->entity->setIsOpen(!empty($source['o:is_open']));
     }

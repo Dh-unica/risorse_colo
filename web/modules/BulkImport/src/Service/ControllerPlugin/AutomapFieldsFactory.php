@@ -13,9 +13,13 @@ class AutomapFieldsFactory implements FactoryInterface
         $map = require dirname(__DIR__, 3) . '/data/mappings/fields_to_metadata.php';
         $plugins = $services->get('ControllerPluginManager');
         return new AutomapFields(
-            $map,
-            $plugins->get('api'),
-            $plugins->get('bulk')
+            $services->get('Omeka\ApiManager'),
+            $plugins->get('bulk'),
+            $services->get('EasyMeta'),
+            $services->get('Omeka\Logger'),
+            $plugins->get('messenger'),
+            $plugins->get('translate'),
+            $map
         );
     }
 }

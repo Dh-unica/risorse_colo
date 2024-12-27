@@ -4,6 +4,7 @@ namespace BulkImport\Reader;
 
 use BulkImport\Interfaces\Configurable;
 use BulkImport\Interfaces\Parametrizable;
+use Common\Stdlib\PsrMessage;
 
 abstract class AbstractGenericFileReader extends AbstractFileReader
 {
@@ -20,7 +21,10 @@ abstract class AbstractGenericFileReader extends AbstractFileReader
         // TODO Currently, the generic reader requires an uploaded file to get the specific reader.
         $file = $this->getParam('file');
         if (!$file) {
-            return false;
+            $this->lastErrorMessage = new PsrMessage(
+                'This reader requires a file or a url.' // @translate
+            );
+            return parent::isValid();
         }
         if (!parent::isValid()) {
             return false;
@@ -92,7 +96,7 @@ abstract class AbstractGenericFileReader extends AbstractFileReader
         return $this->isReady;
     }
 
-    protected function prepareIterator(): \BulkImport\Reader\Reader
+    protected function prepareIterator(): self
     {
         $this->reset();
         if (!$this->isValid()) {
@@ -103,7 +107,7 @@ abstract class AbstractGenericFileReader extends AbstractFileReader
         return $this;
     }
 
-    protected function initializeReader(): \BulkImport\Reader\Reader
+    protected function initializeReader(): self
     {
         $file = $this->getParam('file');
         $readerClass = $this->mediaTypeReaders[$file['type']];
