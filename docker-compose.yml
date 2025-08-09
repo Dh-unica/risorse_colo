@@ -10,6 +10,7 @@ services:
       MYSQL_DATABASE: $DB_NAME
       MYSQL_USER: $DB_USER
       MYSQL_PASSWORD: $DB_PASSWORD
+      MYSQL_LOG_CONSOLE: 0
     volumes:
         - ./mariadb-init:/docker-entrypoint-initdb.d 
   #    - /path/to/mariadb/data/on/host:/var/lib/mysql # I want to manage volumes manually.
@@ -37,6 +38,8 @@ services:
       DB_NAME: $DB_NAME
       PHP_FPM_USER: wodby
       PHP_FPM_GROUP: wodby
+      PHP_DISPLAY_ERRORS: 0
+      PHP_ERROR_REPORTING: "E_ERROR"
     #      # Read instructions at https://wodby.com/docs/stacks/php/local/#xdebug
     #      PHP_XDEBUG: 1
     #      PHP_XDEBUG_DEFAULT_ENABLE: 1
@@ -77,7 +80,7 @@ services:
     depends_on:
     - php
     environment:
-      APACHE_LOG_LEVEL: debug
+      APACHE_LOG_LEVEL: warn
       APACHE_BACKEND_HOST: php
       APACHE_VHOST_PRESET: php
       APACHE_DOCUMENT_ROOT: /var/www/html/
@@ -131,17 +134,18 @@ services:
 #    labels:
 #    - "traefik.http.routers.${PROJECT_NAME}_adminer.rule=Host(`adminer.${PROJECT_BASE_URL}`)"
 
-  pma:
-    image: phpmyadmin/phpmyadmin
-    container_name: risorse_colo_pma
-    environment:
-      PMA_HOST: mariadb
-      PMA_USER: $DB_USER
-      PMA_PASSWORD: $DB_PASSWORD
-      PHP_UPLOAD_MAX_FILESIZE: 1G
-      PHP_MAX_INPUT_VARS: 1G
-    ports:
-      - '8090:80'
+#  pma:
+#    image: phpmyadmin/phpmyadmin
+#    container_name: risorse_colo_pma
+#    environment:
+#      PMA_HOST: mariadb
+#      PMA_USER: $DB_USER
+#      PMA_PASSWORD: $DB_PASSWORD
+#      PHP_UPLOAD_MAX_FILESIZE: 1G
+#      PHP_MAX_INPUT_VARS: 1G
+#      PMA_VERBOSE: 0
+#    ports:
+#      - '8090:80'
 
 
 #  pma:
