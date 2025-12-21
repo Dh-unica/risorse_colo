@@ -8,9 +8,9 @@
 
 ## 📖 Panoramica
 
-**Risorse** è un'installazione di [Omeka S](https://omeka.org/s/) dedicata all'archiviazione, gestione e disseminazione di **oggetti digitali** prodotti nell'ambito dei progetti di ricerca del [Dipartimento di Digital Humanities](https://dh.unica.it) dell'Università di Cagliari.
+**Risorse** è un'installazione di [Omeka S](https://omeka.org/s/) dedicata all'archiviazione, gestione e disseminazione di **oggetti digitali** prodotti nell'ambito dei progetti di ricerca storica del [Dipartimento di Digital Humanities](https://dh.unica.it) dell'Università di Cagliari.
 
-Il repository fa parte dell'ecosistema [storia.dh.unica.it](https://storia.dh.unica.it), il portale della Storia Digitale UniCA che sviluppa applicativi e flussi di lavoro digitali per la ricerca storica. Risorse centralizza e preserva le risorse digitali di progetti quali:
+Il progetto si inserisce nelle iniziative di sviluppo applicativi e flussi di lavoro digitali per la ricerca storica digitale. Il repository fa parte dell'ecosistema [storia.dh.unica.it](https://storia.dh.unica.it), il portale della Storia Digitale UniCA. Risorse centralizza e preserva le risorse digitali di progetti quali:
 
 - **[Colonizzazioni interne e migrazioni](https://storia.dh.unica.it/colonizzazioninterne)** - Catalogazione e geolocalizzazione dei progetti di popolamento promossi in Europa (XVI-XVIII secolo)
 - **[Atlante digitale di Storia Marittima](https://storia.dh.unica.it/asmsa/)** - Storia marittima del Regno di Sardegna e connettività mediterranee
