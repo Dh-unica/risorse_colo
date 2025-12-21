@@ -1,7 +1,56 @@
+# IDE
 .idea/
-mutagen.yml.lock
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment & Configuration
+.env
+.env.local
+.env.*.local
+
+# Database
+/web/config/database.ini
+/web/config/local.config.php
+*.sql
+*.sql.gz
+*.sql.zip
+
+# Backups
+/backup/
+/backup/*
+
+# Database initialization (dumps)
 /mariadb-init/*.sql
 /mariadb-init/*.zip
 
+# Uploaded files
 /web/files/
 /web/files/*
+
+# Logs
+/web/logs/
+/web/logs/*
+*.log
+
+# Mutagen
+mutagen.yml.lock
+
+# OS Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak
+*.cache
+
+# Docker volumes data (if any)
+/volumes/
+/data/

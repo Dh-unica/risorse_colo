@@ -98,13 +98,13 @@ Inoltre, grazie al modulo **MarcXmlExport**, è possibile esportare le risorse i
    ```
    
    Dovresti vedere tre container in esecuzione:
-   - `risorse_colo_apache` (porta 8000)
+   - `risorse_colo_apache` (porta 6000)
    - `risorse_colo_php`
    - `risorse_colo_mariadb`
 
 5. **Accesso all'applicazione:**
    
-   Apri il browser all'indirizzo: **http://localhost:8000**
+   Apri il browser all'indirizzo: **http://localhost:6000**
 
 ### 🔐 Reset Password Admin (per uso locale)
 
