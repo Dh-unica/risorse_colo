@@ -28,7 +28,9 @@ services:
   #    - /path/to/postgres/data/on/host:/var/lib/postgresql/data # I want to manage volumes manually.
 
   php:
-    image: wodby/php:$PHP_TAG
+    # PHP 8.3.36, corregge PHP2Shell (CVE-2026-109618, CVE-2026-109619). Fissata per digest, verificata dal
+    # registry il 25/10/2026. Prima wodby/php:$PHP_TAG con PHP_TAG=7.4-dev-4.16.2 nel .env, cioè PHP 7.4.11.
+    image: wodby/php:8.3.36-dev-r2@sha256:160eb321ce94bda70e5d07d426968984dea1c5902e41bdaf433cafa102ce8473
     container_name: "${PROJECT_NAME}_php"
     environment:
       PHP_SENDMAIL_PATH: /usr/sbin/sendmail -t -i -S mailhog:1025
@@ -40,6 +42,10 @@ services:
       PHP_FPM_GROUP: wodby
       PHP_DISPLAY_ERRORS: 0
       PHP_ERROR_REPORTING: "E_ERROR"
+      # CVE-2026-115560 non ha ancora una correzione: passa dal progresso degli upload, che Omeka non usa
+      PHP_SESSION_UPLOAD_PROGRESS_ENABLED: "0"
+      # come con l'immagine 7.4: la nuova ha 128M di default
+      PHP_APCU_SHM_SIZE: 32M
     #      # Read instructions at https://wodby.com/docs/stacks/php/local/#xdebug
     #      PHP_XDEBUG: 1
     #      PHP_XDEBUG_DEFAULT_ENABLE: 1
